@@ -3,11 +3,11 @@ import AVFoundation
 import Combine
 
 @MainActor
-public class AudioDetectionManager: NSObject, ObservableObject {
+class AudioDetectionManager: NSObject, ObservableObject {
     @Published var audioState = AudioState()
     
     private let audioEngine = AVAudioEngine()
-    private let speechThreshold: Float = 0.01
+    private let speechThreshold: Float = 0.05  // Further increased to reduce false positives
     
     func start() {
         let inputNode = audioEngine.inputNode

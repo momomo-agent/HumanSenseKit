@@ -6,16 +6,18 @@ import SwiftUI
 public class HumanSenseKit {
     public let state: HumanSenseState
     public let observer: HumanSenseObserver
+    public let sttManager: STTManager
     
     private let faceManager: FaceTrackingManager
     private let audioManager: AudioDetectionManager
     private let handManager: HandGestureManager?
     private let engine: HumanStateEngine
     
-    public init(enableHandGestures: Bool = false) {
+    public init(enableHandGestures: Bool = false, enableSTT: Bool = true) {
         self.faceManager = FaceTrackingManager()
         self.audioManager = AudioDetectionManager()
         self.handManager = enableHandGestures ? HandGestureManager() : nil
+        self.sttManager = STTManager()
         self.engine = HumanStateEngine(
             faceManager: faceManager,
             audioManager: audioManager,
@@ -29,12 +31,14 @@ public class HumanSenseKit {
         faceManager.start()
         audioManager.start()
         handManager?.start()
+        sttManager.start()
     }
     
     public func stop() {
         faceManager.stop()
         audioManager.stop()
         handManager?.stop()
+        sttManager.stop()
     }
     
     // MARK: - Debug UI

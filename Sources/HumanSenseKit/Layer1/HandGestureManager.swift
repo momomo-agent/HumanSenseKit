@@ -1,81 +1,115 @@
 import Foundation
 import Vision
-import AVFoundation
+import ARKit
 import Combine
 
 @MainActor
-public class HandGestureManager: NSObject, ObservableObject {
+class HandGestureManager: NSObject, ObservableObject {
     @Published var handState = HandState()
 
-    private let captureSession = AVCaptureSession()
-    private let videoOutput = AVCaptureVideoDataOutput()
     private let processingQueue = DispatchQueue(label: "com.momomo.handgesture", qos: .userInitiated)
 
-    override init() {
-        super.init()
-        setupCapture()
-    }
-
-    private func setupCapture() {
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
-
-        captureSession.beginConfiguration()
-        captureSession.sessionPreset = .medium
-        if captureSession.canAddInput(input) { captureSession.addInput(input) }
-        videoOutput.setSampleBufferDelegate(self, queue: processingQueue)
-        videoOutput.alwaysDiscardsLateVideoFrames = true
-        if captureSession.canAddOutput(videoOutput) { captureSession.addOutput(videoOutput) }
-        captureSession.commitConfiguration()
-    }
-
     func start() {
-        Task { @MainActor in
-            self.captureSession.startRunning()
+        processingQueue.async { [weak self] in
+            self?.isProcessingEnabled = true
         }
     }
 
     func stop() {
-        captureSession.stopRunning()
+        processingQueue.async { [weak self] in
+            self?.isProcessingEnabled = false
+        }
     }
-}
-
-extension HandGestureManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let request = VNDetectHumanHandPoseRequest()
-        request.maximumHandCount = 1
-
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .leftMirrored)
-        guard let _ = try? handler.perform([request]),
-              let observation = request.results?.first else {
-            Task { @MainActor in
-                self.handState = HandState()
+    
+    private var isProcessingEnabled = false
+    private var frameCount = 0
+    
+    // Called by FaceTrackingManager with ARFrame
+    nonisolated func processFrame(_ frame: ARFrame) {
+        processingQueue.async { [weak self] in
+            guard let self = self, self.isProcessingEnabled else { return }
+            
+            self.frameCount += 1
+            guard self.frameCount % 10 == 0 else { return }  // Process every 10th frame
+            
+            let pixelBuffer = frame.capturedImage
+            
+            let request = VNDetectHumanHandPoseRequest()
+            request.maximumHandCount = 2
+            
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up)
+            
+            do {
+                try handler.perform([request])
+                
+                guard let observations = request.results, !observations.isEmpty else {
+                    Task { @MainActor in
+                        self.handState.detected = false
+                        self.handState.gesture = .none
+                    }
+                    return
+                }
+                
+                // Process first hand
+                let observation = observations[0]
+                let chirality = observation.chirality
+                let isLeft = (chirality == .left)
+                
+                guard let points = try? observation.recognizedPoints(.all) else { return }
+                
+                let gesture = self.recognizeGesture(from: points)
+                
+                Task { @MainActor in
+                    self.handState.detected = true
+                    self.handState.gesture = gesture
+                    self.handState.isLeftHand = isLeft
+                    self.handState.handPoints = points.values.map { CGPoint(x: CGFloat($0.location.x), y: CGFloat($0.location.y)) }
+                }
+                
+            } catch {
+                print("Hand pose detection error: \(error)")
             }
-            return
         }
-
-        // Extract hand points for visualization
-        let jointNames: [VNHumanHandPoseObservation.JointName] = [
-            .wrist, .thumbTip, .thumbIP, .thumbMP, .thumbCMC,
-            .indexTip, .indexDIP, .indexPIP, .indexMCP,
-            .middleTip, .middleDIP, .middlePIP, .middleMCP,
-            .ringTip, .ringDIP, .ringPIP, .ringMCP,
-            .littleTip, .littleDIP, .littlePIP, .littleMCP
-        ]
-
-        let points = jointNames.compactMap { name -> CGPoint? in
-            guard let point = try? observation.recognizedPoint(name),
-                  point.confidence > 0.3 else { return nil }
-            return CGPoint(x: point.location.x, y: 1 - point.location.y) // flip Y
+    }
+    
+    private func recognizeGesture(from points: [VNHumanHandPoseObservation.JointName: VNRecognizedPoint]) -> HandGesture {
+        guard let thumb = points[.thumbTip],
+              let index = points[.indexTip],
+              let middle = points[.middleTip],
+              let ring = points[.ringTip],
+              let pinky = points[.littleTip],
+              let wrist = points[.wrist],
+              thumb.confidence > 0.3,
+              index.confidence > 0.3 else {
+            return .none
         }
-
-        let isLeft = observation.chirality == .left
-        let gesture = HandGesture.detect(from: observation)
-
-        Task { @MainActor in
-            self.handState = HandState(detected: true, gesture: gesture, handPoints: points, isLeftHand: isLeft)
+        
+        let thumbUp = thumb.location.y > wrist.location.y + 0.15
+        let indexUp = index.location.y > wrist.location.y + 0.15
+        let middleUp = middle.location.y > wrist.location.y + 0.15
+        let ringDown = ring.location.y < wrist.location.y + 0.1
+        let pinkyDown = pinky.location.y < wrist.location.y + 0.1
+        
+        if thumbUp && !indexUp && !middleUp && ringDown && pinkyDown {
+            return .thumbsUp
         }
+        
+        if indexUp && middleUp && !thumbUp && ringDown && pinkyDown {
+            return .peace
+        }
+        
+        if thumbUp && indexUp && middleUp && middle.confidence > 0.3 && ring.confidence > 0.3 {
+            return .openPalm
+        }
+        
+        if !thumbUp && !indexUp && !middleUp && ringDown && pinkyDown {
+            return .fist
+        }
+        
+        if indexUp && !middleUp && !thumbUp && ringDown && pinkyDown {
+            return .pointing
+        }
+        
+        return .none
     }
 }

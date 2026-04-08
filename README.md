@@ -6,6 +6,7 @@ Multi-modal human sensing for iOS using ARKit, Vision, and AVFoundation.
 
 - **Face tracking**: 52 blend shapes, gaze direction, head orientation, distance
 - **Speech detection**: Audio volume, speaking state
+- **Speech-to-Text**: Real-time speech recognition (Chinese/English)
 - **Hand gestures**: 5 gestures (👍 ✌️ 🖐 ✊ ☝️), left/right hand distinction
 - **Head gestures**: Nodding, shaking
 - **Gaze tracking**: Screen-space coordinates with smoothing
@@ -48,6 +49,10 @@ if kit.state.isSpeakingToDevice {
 if kit.state.isNodding {
     print("User is nodding")
 }
+
+// Real-time speech recognition
+Text(kit.sttManager.recognizedText)
+    .foregroundStyle(kit.state.isLookingAtScreen ? .blue : .orange)
 ```
 
 ### Layer 3: Semantic/Fluent API
@@ -100,6 +105,19 @@ struct ContentView: View {
 - iOS 17.0+
 - iPhone X or later (TrueDepth camera required)
 - Xcode 15.0+
+
+## Permissions
+
+Add these to your Info.plist:
+
+```xml
+<key>NSCameraUsageDescription</key>
+<string>Used for face tracking and gaze detection</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>Used for speech detection</string>
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Used for real-time speech-to-text</string>
+```
 
 ## License
 

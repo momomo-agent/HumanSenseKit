@@ -2,9 +2,10 @@ import Foundation
 import Combine
 
 @MainActor
-public class HumanStateEngine: ObservableObject {
-    @Published public var humanState = HumanState()
-    @Published public var stateHistory: [(date: Date, activity: HumanActivity)] = []
+@Observable
+class HumanStateEngine {
+    var humanState = HumanState()
+    var stateHistory: [(date: Date, activity: HumanActivity)] = []
 
     private let faceManager: FaceTrackingManager
     private let audioManager: AudioDetectionManager
@@ -17,7 +18,7 @@ public class HumanStateEngine: ObservableObject {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
-    public init(faceManager: FaceTrackingManager, audioManager: AudioDetectionManager, handManager: HandGestureManager) {
+    init(faceManager: FaceTrackingManager, audioManager: AudioDetectionManager, handManager: HandGestureManager) {
         self.faceManager = faceManager
         self.audioManager = audioManager
         self.handManager = handManager
@@ -75,20 +76,20 @@ public class HumanStateEngine: ObservableObject {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        let mouthMoving = jawDelta > 0.015 || face.jawOpen > 0.15
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.2  // Increased thresholds
         if mouthMoving && audio.isSpeaking { return .speaking }
 
         if !face.isLookingAtScreen { return .distracted }
         return .listening
     }
 
-    public func start() {
+    func start() {
         faceManager.start()
         audioManager.start()
         handManager.start()
     }
 
-    public func stop() {
+    func stop() {
         faceManager.stop()
         audioManager.stop()
         handManager.stop()
