@@ -3,7 +3,7 @@ import AVFoundation
 import Combine
 
 @MainActor
-class AudioDetectionManager: NSObject, ObservableObject {
+public class AudioDetectionManager: NSObject, ObservableObject {
     @Published var audioState = AudioState()
     
     private let audioEngine = AVAudioEngine()

@@ -3,7 +3,7 @@ import ARKit
 import Combine
 
 @MainActor
-class FaceTrackingManager: NSObject, ObservableObject {
+public class FaceTrackingManager: NSObject, ObservableObject {
     @Published var faceState = FaceState()
     @Published var currentAnchor: ARFaceAnchor?
     @Published var gazeTrail: [CGPoint] = []

@@ -1,6 +1,6 @@
 import Foundation
 
-struct LowPassFilter {
+public struct LowPassFilter {
     var value: CGFloat
     let alpha: CGFloat  // 0.85 recommended
     

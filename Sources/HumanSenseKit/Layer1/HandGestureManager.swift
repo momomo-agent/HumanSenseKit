@@ -4,7 +4,7 @@ import AVFoundation
 import Combine
 
 @MainActor
-class HandGestureManager: NSObject, ObservableObject {
+public class HandGestureManager: NSObject, ObservableObject {
     @Published var handState = HandState()
 
     private let captureSession = AVCaptureSession()

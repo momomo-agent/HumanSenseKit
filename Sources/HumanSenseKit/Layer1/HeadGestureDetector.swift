@@ -1,6 +1,6 @@
 import Foundation
 
-enum HeadGesture: String {
+public enum HeadGesture: String {
     case none = "无"
     case nodding = "点头"
     case shaking = "摇头"
@@ -9,7 +9,7 @@ enum HeadGesture: String {
 }
 
 /// Detects head gestures by analyzing pitch/yaw/roll history
-class HeadGestureDetector {
+public class HeadGestureDetector {
     private var pitchHistory: [Float] = []
     private var yawHistory: [Float] = []
     private let windowSize = 20  // ~0.33s at 60fps

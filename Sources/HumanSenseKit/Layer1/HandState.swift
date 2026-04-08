@@ -1,7 +1,7 @@
 import Foundation
 import Vision
 
-enum HandGesture: String {
+public enum HandGesture: String {
     case none = "无手势"
     case thumbsUp = "👍 点赞"
     case peace = "✌️ 胜利"
@@ -63,7 +63,7 @@ enum HandGesture: String {
     }
 }
 
-struct HandState {
+public struct HandState {
     var detected: Bool = false
     var gesture: HandGesture = .none
     var handPoints: [CGPoint] = []

@@ -9,28 +9,32 @@ public class HumanSenseKit {
     
     private let faceManager: FaceTrackingManager
     private let audioManager: AudioDetectionManager
-    private let handManager: HandGestureManager
+    private let handManager: HandGestureManager?
     private let engine: HumanStateEngine
     
-    public init() {
+    public init(enableHandGestures: Bool = false) {
         self.faceManager = FaceTrackingManager()
         self.audioManager = AudioDetectionManager()
-        self.handManager = HandGestureManager()
+        self.handManager = enableHandGestures ? HandGestureManager() : nil
         self.engine = HumanStateEngine(
             faceManager: faceManager,
             audioManager: audioManager,
-            handManager: handManager
+            handManager: handManager ?? HandGestureManager()
         )
         self.state = HumanSenseState(engine: engine)
         self.observer = HumanSenseObserver(state: state)
     }
     
     public func start() {
-        engine.start()
+        faceManager.start()
+        audioManager.start()
+        handManager?.start()
     }
     
     public func stop() {
-        engine.stop()
+        faceManager.stop()
+        audioManager.stop()
+        handManager?.stop()
     }
     
     // MARK: - Debug UI

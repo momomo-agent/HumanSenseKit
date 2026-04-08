@@ -1,7 +1,7 @@
 import Foundation
 import ARKit
 
-struct FaceState {
+public struct FaceState {
     // Gaze
     var gazePoint: CGPoint = .zero
     var isLookingAtScreen: Bool = false

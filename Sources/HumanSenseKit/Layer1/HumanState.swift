@@ -1,6 +1,6 @@
 import Foundation
 
-enum HumanActivity: String, CaseIterable {
+public enum HumanActivity: String, CaseIterable {
     case absent       = "不在画面中"
     case eyesClosed   = "闭着眼睛"
     case distracted   = "看向别处"
@@ -28,7 +28,7 @@ enum HumanActivity: String, CaseIterable {
     }
 }
 
-struct HumanState {
+public struct HumanState {
     var activity: HumanActivity = .absent
     var face: FaceState = FaceState()
     var audio: AudioState = AudioState()
