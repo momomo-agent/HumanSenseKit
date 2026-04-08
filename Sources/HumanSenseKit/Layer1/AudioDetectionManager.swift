@@ -7,7 +7,7 @@ class AudioDetectionManager: NSObject, ObservableObject {
     @Published var audioState = AudioState()
     
     private let audioEngine = AVAudioEngine()
-    private let speechThreshold: Float = 0.05  // Further increased to reduce false positives
+    private let speechThreshold: Float = 0.0015  // Lowered to detect quieter speech
     
     func start() {
         let inputNode = audioEngine.inputNode
@@ -20,6 +20,11 @@ class AudioDetectionManager: NSObject, ObservableObject {
             Task { @MainActor in
                 self.audioState.volume = rms
                 self.audioState.isSpeaking = rms > self.speechThreshold
+                
+                // Debug output every 30 frames (~1 second)
+                if Int.random(in: 0..<30) == 0 {
+                    print("DEBUG Audio - volume: \(rms), threshold: \(self.speechThreshold), speaking: \(rms > self.speechThreshold)")
+                }
             }
         }
         

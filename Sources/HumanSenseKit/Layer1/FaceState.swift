@@ -39,6 +39,9 @@ public struct FaceState {
     // Head gesture
     var headGesture: HeadGesture = .none
 
+    // Emotion
+    var emotion: Emotion = .neutral
+
     // Distance label
     var distanceLabel: String {
         switch distanceFromCamera {

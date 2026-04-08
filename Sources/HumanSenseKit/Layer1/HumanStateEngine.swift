@@ -76,8 +76,15 @@ class HumanStateEngine {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.2  // Increased thresholds
-        if mouthMoving && audio.isSpeaking { return .speaking }
+        humanState.debugJawDelta = jawDelta  // Expose for debugging
+        
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.2  // Back to OR
+        
+        // Speaking requires BOTH mouth movement AND audio
+        // Only check audio if mouth is moving
+        if mouthMoving {
+            if audio.isSpeaking { return .speaking }
+        }
 
         if !face.isLookingAtScreen { return .distracted }
         return .listening

@@ -16,6 +16,7 @@ class FaceTrackingManager: NSObject, ObservableObject {
     private var previousJawOpen: Float = 0
     private var lastTrailAppend = Date.distantPast
     private let headGestureDetector = HeadGestureDetector()
+    private let emotionDetector = EmotionDetector()
     
     weak var handManager: HandGestureManager?
     
@@ -42,9 +43,17 @@ class FaceTrackingManager: NSObject, ObservableObject {
     }
     
     nonisolated private func extractHeadOrientation(from transform: simd_float4x4) -> (yaw: Float, pitch: Float, roll: Float) {
+        // Extract Euler angles from transform matrix
+        // Yaw (left/right rotation around Y axis)
         let yaw = atan2(transform.columns.0.z, transform.columns.2.z)
+        
+        // Pitch (up/down rotation around X axis)
         let pitch = asin(-transform.columns.1.z)
-        let roll = atan2(transform.columns.1.x, transform.columns.1.y)
+        
+        // Roll (tilt rotation around Z axis) with calibration offset
+        let rawRoll = atan2(transform.columns.1.x, transform.columns.1.y)
+        let roll = rawRoll + 1.6  // Calibration offset for this device
+        
         return (yaw, pitch, roll)
     }
 }
@@ -125,6 +134,9 @@ extension FaceTrackingManager: ARSessionDelegate {
                 
                 // Head gesture detection
                 newState.headGesture = self.headGestureDetector.update(yaw: yaw, pitch: pitch, roll: roll)
+                
+                // Emotion detection
+                newState.emotion = self.emotionDetector.detectEmotion(from: anchor.blendShapes, isSpeaking: false)  // Will be updated by HumanStateEngine
                 
                 // Distance from camera (Z axis in meters)
                 newState.distanceFromCamera = abs(anchor.transform.columns.3.z)
