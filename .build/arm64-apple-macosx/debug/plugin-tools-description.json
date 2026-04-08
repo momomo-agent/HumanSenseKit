@@ -1,0 +1,418 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.HumanSenseKit-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/sources",
+      "importPath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/HumanSenseKit.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioDetectionManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceTrackingManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandGestureManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HeadGestureDetector.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanStateEngine.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/LowPassFilter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer2/HumanSenseState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer3/HumanSenseObserver.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "HumanSenseKit",
+      "moduleOutputPath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/Modules/HumanSenseKit.swiftmodule",
+      "objects" : [
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.swift.o",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx10.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/include/HumanSenseKit-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "humansensekit"
+      ],
+      "outputFileMapPath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/Modules/HumanSenseKit.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/HumanSenseKit.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioDetectionManager.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioState.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceState.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceTrackingManager.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandGestureManager.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandState.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HeadGestureDetector.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanState.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanStateEngine.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/LowPassFilter.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer2/HumanSenseState.swift",
+        "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer3/HumanSenseObserver.swift"
+      ],
+      "tempsPath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "HumanSenseKit" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "HumanSenseKit",
+      "-package-name",
+      "humansensekit",
+      "-c",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/HumanSenseKit.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioDetectionManager.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioState.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceState.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceTrackingManager.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandGestureManager.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandState.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HeadGestureDetector.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanState.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanStateEngine.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/LowPassFilter.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer2/HumanSenseState.swift",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer3/HumanSenseObserver.swift",
+      "-I",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx10.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/include/HumanSenseKit-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "humansensekit",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "HumanSenseKit" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/HumanSenseKit.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioDetectionManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceTrackingManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandGestureManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HeadGestureDetector.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanStateEngine.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/LowPassFilter.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer2/HumanSenseState.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer3/HumanSenseObserver.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/sources"
+    },
+    "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

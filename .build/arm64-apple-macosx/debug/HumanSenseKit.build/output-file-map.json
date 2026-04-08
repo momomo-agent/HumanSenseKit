@@ -1,0 +1,103 @@
+{
+  "": {
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/primary.swiftdeps"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseDebugView.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/HumanSenseKit.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseKit.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioDetectionManager.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioDetectionManager.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/AudioState.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/AudioState.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceState.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceState.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/FaceTrackingManager.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/FaceTrackingManager.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandGestureManager.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandGestureManager.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HandState.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HandState.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HeadGestureDetector.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HeadGestureDetector.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanState.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanState.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/HumanStateEngine.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanStateEngine.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer1/LowPassFilter.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/LowPassFilter.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer2/HumanSenseState.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseState.dia"
+  },
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/Layer3/HumanSenseObserver.swift": {
+    "dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.d",
+    "object": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.swift.o",
+    "swiftmodule": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver~partial.swiftmodule",
+    "swift-dependencies": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.swiftdeps",
+    "diagnostics": "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/HumanSenseObserver.dia"
+  }
+}

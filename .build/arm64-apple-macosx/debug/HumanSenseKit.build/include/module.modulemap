@@ -1,0 +1,3 @@
+module HumanSenseKit {
+    header "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/.build/arm64-apple-macosx/debug/HumanSenseKit.build/include/HumanSenseKit-Swift.h"
+}
