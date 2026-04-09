@@ -3,7 +3,7 @@ import Combine
 
 @MainActor
 @Observable
-class HumanStateEngine {
+public class HumanStateEngine {
     var humanState = HumanState()
     var stateHistory: [(date: Date, activity: HumanActivity)] = []
 
