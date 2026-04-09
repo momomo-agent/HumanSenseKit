@@ -46,6 +46,7 @@ public class HumanSenseObserver {
 
 // MARK: - Condition Builder
 
+@MainActor
 public class ConditionBuilder {
     private let state: HumanSenseState
     private let conditions: [(HumanSenseState) -> Bool]
