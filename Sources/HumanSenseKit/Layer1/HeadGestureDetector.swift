@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 
 public enum HeadGesture: String {
@@ -15,10 +16,12 @@ public class HeadGestureDetector {
     private let windowSize = 20  // ~0.33s at 60fps
     private let minAmplitude: Float = 0.12  // ~7 degrees
 
-    var currentGesture: HeadGesture = .none
+    public var currentGesture: HeadGesture = .none
     private var gestureCooldown: Int = 0
 
-    func update(yaw: Float, pitch: Float, roll: Float) -> HeadGesture {
+    public init() {}
+
+    public func update(yaw: Float, pitch: Float, roll: Float) -> HeadGesture {
         pitchHistory.append(pitch)
         yawHistory.append(yaw)
         if pitchHistory.count > windowSize { pitchHistory.removeFirst() }
@@ -66,3 +69,4 @@ public class HeadGestureDetector {
         return reversals >= 2
     }
 }
+#endif

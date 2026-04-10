@@ -1,57 +1,61 @@
+#if os(iOS)
 import Foundation
 import AVFoundation
 import Combine
 
+/// Pure audio-level analysis — no longer owns an AudioEngine.
+/// Receives buffers from STTManager via `processBuffer(_:)`.
 @MainActor
-class AudioDetectionManager: NSObject, ObservableObject {
-    @Published var audioState = AudioState()
-    
-    private let audioEngine = AVAudioEngine()
-    private let speechThreshold: Float = 0.0015  // Lowered to detect quieter speech
-    
-    func start() {
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
-            let rms = self.calculateRMS(buffer: buffer)
-            
-            Task { @MainActor in
-                self.audioState.volume = rms
-                self.audioState.isSpeaking = rms > self.speechThreshold
-                
-                // Debug output every 30 frames (~1 second)
-                if Int.random(in: 0..<30) == 0 {
-                    print("DEBUG Audio - volume: \(rms), threshold: \(self.speechThreshold), speaking: \(rms > self.speechThreshold)")
+public class AudioDetectionManager: NSObject, ObservableObject {
+    @Published public var audioState = AudioState()
+
+    private let speechThreshold: Float = 0.0015
+    private var silenceTimer: Timer?
+    private let silenceDelay: TimeInterval = 0.5
+
+    public override init() {
+        super.init()
+    }
+
+    /// Called from STTManager's shared audio tap.
+    public func processBuffer(_ buffer: AVAudioPCMBuffer) {
+        let rms = calculateRMS(buffer: buffer)
+
+        audioState.volume = rms
+        let aboveThreshold = rms > speechThreshold
+
+        if aboveThreshold {
+            silenceTimer?.invalidate()
+            silenceTimer = nil
+            audioState.isSpeaking = true
+        } else if audioState.isSpeaking && silenceTimer == nil {
+            silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceDelay, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    self?.audioState.isSpeaking = false
+                    self?.silenceTimer = nil
                 }
             }
         }
-        
-        do {
-            try audioEngine.start()
-        } catch {
-            print("Audio engine failed to start: \(error)")
-        }
     }
-    
-    func stop() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+
+    public func stop() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        audioState.isSpeaking = false
     }
-    
+
     private func calculateRMS(buffer: AVAudioPCMBuffer) -> Float {
         guard let channelData = buffer.floatChannelData else { return 0 }
         let channelDataValue = channelData.pointee
         let frameLength = Int(buffer.frameLength)
-        
+
         var sum: Float = 0
         for i in 0..<frameLength {
             let sample = channelDataValue[i]
             sum += sample * sample
         }
-        
-        let rms = sqrt(sum / Float(frameLength))
-        return rms
+
+        return sqrt(sum / Float(frameLength))
     }
 }
+#endif

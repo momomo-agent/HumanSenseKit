@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 import SwiftUI
 
@@ -49,3 +50,4 @@ public class HumanSenseKit {
     }
     #endif
 }
+#endif

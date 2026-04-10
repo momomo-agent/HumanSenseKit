@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 
 public enum Emotion: String {
@@ -8,3 +9,4 @@ public enum Emotion: String {
     case angry = "😠 愤怒"
     case disgusted = "🤢 厌恶"
 }
+#endif

@@ -1,49 +1,66 @@
+#if os(iOS)
 import Foundation
 import ARKit
 
+public enum HeadOrientation {
+    case forward, left, right
+
+    public static let threshold: Float = 0.3  // ~17 degrees
+
+    public init(yaw: Float) {
+        if yaw > Self.threshold { self = .left }
+        else if yaw < -Self.threshold { self = .right }
+        else { self = .forward }
+    }
+
+    public var isFacingForward: Bool { self == .forward }
+}
+
 public struct FaceState {
     // Gaze
-    var gazePoint: CGPoint = .zero
-    var isLookingAtScreen: Bool = false
+    public var gazePoint: CGPoint = .zero
+    public var isLookingAtScreen: Bool = false
 
     // Head orientation (radians)
-    var headYaw: Float = 0    // left/right
-    var headPitch: Float = 0  // up/down
-    var headRoll: Float = 0   // tilt
+    public var headYaw: Float = 0    // left/right
+    public var headPitch: Float = 0  // up/down
+    public var headRoll: Float = 0   // tilt
 
     // Distance from camera (meters)
-    var distanceFromCamera: Float = 0
+    public var distanceFromCamera: Float = 0
 
     // Mouth
-    var jawOpen: Float = 0
-    var mouthClose: Float = 0
+    public var jawOpen: Float = 0
+    public var mouthClose: Float = 0
 
     // Eyes
-    var eyeBlinkLeft: Float = 0
-    var eyeBlinkRight: Float = 0
-    var eyeLookInLeft: Float = 0
-    var eyeLookOutLeft: Float = 0
-    var eyeLookUpLeft: Float = 0
-    var eyeLookDownLeft: Float = 0
-    var eyeLookInRight: Float = 0
-    var eyeLookOutRight: Float = 0
-    var eyeLookUpRight: Float = 0
-    var eyeLookDownRight: Float = 0
+    public var eyeBlinkLeft: Float = 0
+    public var eyeBlinkRight: Float = 0
+    public var eyeLookInLeft: Float = 0
+    public var eyeLookOutLeft: Float = 0
+    public var eyeLookUpLeft: Float = 0
+    public var eyeLookDownLeft: Float = 0
+    public var eyeLookInRight: Float = 0
+    public var eyeLookOutRight: Float = 0
+    public var eyeLookUpRight: Float = 0
+    public var eyeLookDownRight: Float = 0
 
     // Derived
-    var gazeH: Float { ((eyeLookInLeft - eyeLookOutLeft) + (eyeLookOutRight - eyeLookInRight)) / 2 }
-    var gazeV: Float { ((eyeLookDownLeft - eyeLookUpLeft) + (eyeLookDownRight - eyeLookUpRight)) / 2 }
-    var eyesClosed: Bool { eyeBlinkLeft > 0.8 && eyeBlinkRight > 0.8 }
-    var faceDetected: Bool = false
+    public var gazeH: Float { ((eyeLookInLeft - eyeLookOutLeft) + (eyeLookOutRight - eyeLookInRight)) / 2 }
+    public var gazeV: Float { ((eyeLookDownLeft - eyeLookUpLeft) + (eyeLookDownRight - eyeLookUpRight)) / 2 }
+    public var eyesClosed: Bool { eyeBlinkLeft > 0.8 && eyeBlinkRight > 0.8 }
+    public var faceDetected: Bool = false
+
+    public var headOrientation: HeadOrientation { HeadOrientation(yaw: headYaw) }
 
     // Head gesture
-    var headGesture: HeadGesture = .none
+    public var headGesture: HeadGesture = .none
 
     // Emotion
-    var emotion: Emotion = .neutral
+    public var emotion: Emotion = .neutral
 
     // Distance label
-    var distanceLabel: String {
+    public var distanceLabel: String {
         switch distanceFromCamera {
         case 0: return "未知"
         case ..<0.3: return "很近"
@@ -53,4 +70,7 @@ public struct FaceState {
         default: return "很远"
         }
     }
+
+    public init() {}
 }
+#endif
