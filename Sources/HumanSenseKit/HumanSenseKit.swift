@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import SwiftUI
+import ARKit
 
 /// Main entry point for HumanSenseKit
 @MainActor
@@ -9,37 +10,28 @@ public class HumanSenseKit {
     public let observer: HumanSenseObserver
     public let sttManager: STTManager
     
-    private let faceManager: FaceTrackingManager
-    private let audioManager: AudioDetectionManager
-    private let handManager: HandGestureManager?
     private let engine: HumanStateEngine
     
     public init(enableHandGestures: Bool = false, enableSTT: Bool = true) {
-        self.faceManager = FaceTrackingManager()
-        self.audioManager = AudioDetectionManager()
-        self.handManager = enableHandGestures ? HandGestureManager() : nil
-        self.sttManager = STTManager()
-        self.engine = HumanStateEngine(
-            faceManager: faceManager,
-            audioManager: audioManager,
-            handManager: handManager ?? HandGestureManager()
-        )
+        self.engine = HumanStateEngine()
+        self.sttManager = engine.sttManager
         self.state = HumanSenseState(engine: engine)
         self.observer = HumanSenseObserver(state: state)
     }
     
     public func start() {
-        faceManager.start()
-        audioManager.start()
-        handManager?.start()
-        sttManager.start()
+        engine.start()
     }
     
     public func stop() {
-        faceManager.stop()
-        audioManager.stop()
-        handManager?.stop()
-        sttManager.stop()
+        engine.stop()
+    }
+    
+    // MARK: - Raw Sensor Access
+    
+    /// The current ARFaceAnchor from face tracking, if available.
+    public var currentFaceAnchor: ARFaceAnchor? {
+        engine.currentFaceAnchor
     }
     
     // MARK: - Debug UI
