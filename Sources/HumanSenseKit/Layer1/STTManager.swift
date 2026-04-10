@@ -179,6 +179,40 @@ public class STTManager: NSObject, ObservableObject {
     // MARK: - Audio Engine
 
     private func beginListening() {
+        // Observe audio session interruptions (ARKit can steal the session)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        
+        configureAndStartAudioEngine()
+    }
+    
+    @objc private func handleAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        if type == .ended {
+            NSLog("[STT] Audio interruption ended — restarting audio engine")
+            Task { @MainActor in
+                self.configureAndStartAudioEngine()
+            }
+        } else {
+            NSLog("[STT] Audio interruption began")
+        }
+    }
+    
+    private func configureAndStartAudioEngine() {
+        // Stop existing engine if running
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+        
         let audioSession = AVAudioSession.sharedInstance()
         // playAndRecord allows coexistence with ARKit's audio session
         do {
