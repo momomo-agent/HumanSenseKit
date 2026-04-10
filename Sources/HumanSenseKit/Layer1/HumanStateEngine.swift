@@ -15,6 +15,12 @@ public class HumanStateEngine {
     public var currentARFrame: ARFrame? { faceManager.currentFrame }
     public var gazeTrail: [CGPoint] { faceManager.gazeTrail }
 
+    /// Real-time ARFrame callback — bypasses SwiftUI for 60fps consumers.
+    public var onARFrame: ((ARFrame) -> Void)? {
+        get { faceManager.onARFrame }
+        set { faceManager.onARFrame = newValue }
+    }
+
     // --- Owned managers ---
     public let faceManager: FaceTrackingManager
     public let audioManager: AudioDetectionManager

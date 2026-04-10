@@ -7,9 +7,15 @@ import Combine
 public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var faceState = FaceState()
     @Published public var currentAnchor: ARFaceAnchor?
-    @Published public var currentFrame: ARFrame?
+    /// Latest ARFrame — NOT @Published to avoid 60fps SwiftUI redraws.
+    /// Access directly; use onARFrame callback for real-time consumers.
+    public private(set) var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
     @Published public var arSessionReady = false
+    
+    /// Real-time ARFrame callback for UIKit consumers (e.g. AvatarKit).
+    /// Called on main thread at ARKit frame rate (~60fps).
+    public var onARFrame: ((ARFrame) -> Void)?
 
     /// The ARSession this manager reads from. Owned externally; FaceTrackingManager is a consumer.
     private var arSession: ARSession?
@@ -191,6 +197,7 @@ extension FaceTrackingManager: ARSessionDelegate {
                 self.previousJawOpen = jawOpen
                 self.currentAnchor = anchor
                 self.currentFrame = frame
+                self.onARFrame?(frame)
 
                 // Append gaze trail at ~10fps
                 let now = Date()

@@ -19,6 +19,12 @@ public class HumanSenseKit {
         self.observer = HumanSenseObserver(state: state)
     }
     
+    /// Real-time ARFrame callback — bypasses SwiftUI for 60fps consumers (e.g. AvatarKit).
+    public var onARFrame: ((ARFrame) -> Void)? {
+        get { engine.onARFrame }
+        set { engine.onARFrame = newValue }
+    }
+    
     /// Start sensing. Optionally provide a shared ARSession.
     /// If nil, HumanSenseKit creates its own.
     public func start(session: ARSession? = nil) {
