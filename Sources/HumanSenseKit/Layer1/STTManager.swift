@@ -214,13 +214,20 @@ public class STTManager: NSObject, ObservableObject {
               let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         
-        if type == .ended {
+        switch type {
+        case .began:
+            NSLog("[STT] ⚠️ Audio session INTERRUPTED!")
+            Task { @MainActor in
+                self.lastError = "Audio session interrupted"
+            }
+        case .ended:
             NSLog("[STT] Audio interruption ended — restarting audio engine")
             Task { @MainActor in
+                self.lastError = nil
                 self.configureAndStartAudioEngine()
             }
-        } else {
-            NSLog("[STT] Audio interruption began")
+        @unknown default:
+            break
         }
     }
     
@@ -275,9 +282,7 @@ public class STTManager: NSObject, ObservableObject {
         }
         isListening = true
         
-        // Monitor audio session interruptions (e.g. from AVTRecordView)
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption(_:)), name: AVAudioSession.interruptionNotification, object: nil)
+        // Monitor audio route changes
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange(_:)), name: AVAudioSession.routeChangeNotification, object: nil)
         
@@ -300,29 +305,6 @@ public class STTManager: NSObject, ObservableObject {
 
         startRecognitionTask()
         startSilenceTimer()
-    }
-    
-    // MARK: - Audio Session Monitoring
-    
-    @objc private func handleAudioInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        
-        switch type {
-        case .began:
-            NSLog("[STT] ⚠️ Audio session INTERRUPTED!")
-            Task { @MainActor in
-                self.lastError = "Audio session interrupted"
-            }
-        case .ended:
-            NSLog("[STT] Audio session interruption ended, restarting engine")
-            Task { @MainActor in
-                self.configureAndStartAudioEngine()
-            }
-        @unknown default:
-            break
-        }
     }
     
     @objc private func handleRouteChange(_ notification: Notification) {
