@@ -154,9 +154,6 @@ public class STTManager: NSObject, ObservableObject {
         for s in sentences { appendSentence(s) }
         if let active = activeSentence, !active.text.isEmpty { appendSentence(active) }
 
-        for seg in result {
-            print("[STT] SEG isFromUser=\(seg.isFromUser) started=\(seg.sentenceStartedLookingAtScreen) toScreen=\(seg.isToScreen) text=\(seg.text.prefix(20))")
-        }
         segments = result
     }
 
@@ -309,7 +306,6 @@ public class STTManager: NSObject, ObservableObject {
             let looking = isSpeaking ? gazeAtSpeechOnset : false
             activeSentence?.startedLookingAtScreen = looking
             activeSentence?.isFromUser = isSpeaking
-            print("[STT] LOCK isFromUser=\(isSpeaking) looking=\(looking) gazeOnset=\(gazeAtSpeechOnset) text=\(newText.prefix(20))")
             if looking {
                 activeSentence?.gazeSpans = [GazeSpan(charCount: newCharCount, isToScreen: isLookingAtScreen)]
             }
