@@ -47,13 +47,18 @@ public class HumanStateEngine {
     }
 
     public func start(session: ARSession? = nil) {
+        // STT must start AFTER ARKit — ARSession.run() reconfigures AVAudioSession,
+        // so STT's audio engine setup needs to happen last to take effect.
         if let session {
             faceManager.start(session: session)
         } else {
             faceManager.start()
         }
         deviceMotionManager.start()
-        sttManager.start()
+        // Delay STT start slightly to ensure ARKit's audio session setup is done
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.sttManager.start()
+        }
     }
 
     public func stop() {

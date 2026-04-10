@@ -41,6 +41,7 @@ public class FaceTrackingManager: NSObject, ObservableObject {
         NSLog("[FaceTracking] Starting face tracking on shared ARSession")
         let config = ARFaceTrackingConfiguration()
         config.worldAlignment = .camera
+        config.providesAudioData = false
         session.delegate = self
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
