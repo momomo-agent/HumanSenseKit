@@ -19,8 +19,10 @@ public class HumanSenseKit {
         self.observer = HumanSenseObserver(state: state)
     }
     
-    public func start() {
-        engine.start()
+    /// Start sensing. Optionally provide a shared ARSession.
+    /// If nil, HumanSenseKit creates its own.
+    public func start(session: ARSession? = nil) {
+        engine.start(session: session)
     }
     
     public func stop() {

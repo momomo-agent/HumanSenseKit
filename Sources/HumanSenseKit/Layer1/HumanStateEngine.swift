@@ -46,8 +46,12 @@ public class HumanStateEngine {
         setupBindings()
     }
 
-    public func start() {
-        faceManager.start()
+    public func start(session: ARSession? = nil) {
+        if let session {
+            faceManager.start(session: session)
+        } else {
+            faceManager.start()
+        }
         deviceMotionManager.start()
         sttManager.start()
     }

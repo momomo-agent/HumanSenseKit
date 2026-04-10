@@ -10,8 +10,8 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
 
-    /// The single ARSession — exposed so other consumers (AvatarKit, camera preview) can share it.
-    public let arSession = ARSession()
+    /// The ARSession this manager reads from. Owned externally; FaceTrackingManager is a consumer.
+    private var arSession: ARSession?
     private let processingQueue = DispatchQueue(label: "com.momomo.facetracking", qos: .userInitiated)
 
     private var gazeFilterX: LowPassFilter?
@@ -28,23 +28,31 @@ public class FaceTrackingManager: NSObject, ObservableObject {
 
     public override init() {
         super.init()
-        arSession.delegate = self
     }
 
-    public func start() {
+    /// Attach to an externally-owned ARSession.
+    /// FaceTrackingManager becomes its delegate and configures face tracking.
+    public func start(session: ARSession) {
+        self.arSession = session
         guard ARFaceTrackingConfiguration.isSupported else {
             NSLog("[FaceTracking] ARFaceTracking NOT supported on this device")
             return
         }
-        NSLog("[FaceTracking] Starting ARSession for face tracking")
+        NSLog("[FaceTracking] Starting face tracking on shared ARSession")
         let config = ARFaceTrackingConfiguration()
         config.worldAlignment = .camera
-        arSession.delegate = self
-        arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
+        session.delegate = self
+        session.run(config, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    /// Legacy convenience — creates its own ARSession if none provided.
+    public func start() {
+        let session = ARSession()
+        start(session: session)
     }
 
     public func stop() {
-        arSession.pause()
+        arSession?.pause()
     }
 
     nonisolated private func extractHeadOrientation(from transform: simd_float4x4) -> (yaw: Float, pitch: Float, roll: Float) {
