@@ -9,7 +9,7 @@ public struct SpeechSegment: Identifiable {
     /// true = user's own speech (mouth moving + audio), false = ambient/other people
     public let isFromUser: Bool
 
-    public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool, isFromUser: Bool = true) {
+    public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool, isFromUser: Bool = false) {
         self.id = id
         self.text = text
         self.isToScreen = isToScreen
