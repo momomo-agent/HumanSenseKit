@@ -290,10 +290,12 @@ public class STTManager: NSObject, ObservableObject {
             guard let self = self else { return }
             Task { @MainActor in
                 guard generation == self.taskGeneration else {
+                    NSLog("[STT] Stale callback gen=%d current=%d, ignoring", generation, self.taskGeneration)
                     return
                 }
 
                 if let result = result {
+                    NSLog("[STT] Got result: '%@' isFinal=%d", result.bestTranscription.formattedString, result.isFinal ? 1 : 0)
                     self.handleResult(result)
                     if result.isFinal {
                         self.finalizeActiveSentence()
@@ -324,7 +326,14 @@ public class STTManager: NSObject, ObservableObject {
 
         let request = makeRequest()
         recognitionRequest = request
+        
+        NSLog("[STT] startRecognitionTask gen=%d, recognizer=%@, onDevice=%d", gen,
+              speechRecognizer != nil ? "exists" : "nil",
+              request.requiresOnDeviceRecognition ? 1 : 0)
+        
         bindTask(to: request, generation: gen)
+        
+        NSLog("[STT] recognitionTask=%@", recognitionTask != nil ? "created" : "nil")
     }
 
     private func splitSentence() {
