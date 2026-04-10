@@ -53,6 +53,7 @@ public class HumanStateEngine {
     }
 
     public func start(session: ARSession? = nil) {
+        NSLog("[Engine] start() called, session=%@", session != nil ? "provided" : "nil")
         // Start ARKit first — it reconfigures AVAudioSession
         if let session {
             faceManager.start(session: session)
@@ -61,6 +62,7 @@ public class HumanStateEngine {
         }
         deviceMotionManager.start()
         
+        NSLog("[Engine] Subscribing to arSessionReady (current=%d)", faceManager.arSessionReady ? 1 : 0)
         // Start STT only after ARKit is fully running (first frame received).
         // This ensures ARKit's audio session reconfiguration is done before
         // STT configures its own audio engine on top.

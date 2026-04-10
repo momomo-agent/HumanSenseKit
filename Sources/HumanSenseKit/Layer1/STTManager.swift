@@ -65,14 +65,24 @@ public class STTManager: NSObject, ObservableObject {
     public func captureSpeechStartState() {}
 
     public func start() {
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+        NSLog("[STT] start() called")
+        guard let recognizer = speechRecognizer else {
+            NSLog("[STT] Speech recognizer is nil!")
+            return
+        }
+        NSLog("[STT] recognizer.isAvailable=%d, locale=%@", recognizer.isAvailable ? 1 : 0, recognizer.locale.identifier)
+        guard recognizer.isAvailable else {
             NSLog("[STT] Speech recognizer not available")
             return
         }
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            NSLog("[STT] Authorization status: %d", status.rawValue)
-            guard status == .authorized else { return }
+            NSLog("[STT] Authorization status: %d (0=notDetermined, 1=denied, 2=restricted, 3=authorized)", status.rawValue)
+            guard status == .authorized else {
+                NSLog("[STT] Not authorized, aborting")
+                return
+            }
             Task { @MainActor in
+                NSLog("[STT] Authorized, calling beginListening()")
                 self?.beginListening()
             }
         }
