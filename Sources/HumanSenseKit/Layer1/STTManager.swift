@@ -176,7 +176,8 @@ public class STTManager: NSObject, ObservableObject {
 
     private func beginListening() {
         let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+        // playAndRecord allows coexistence with ARKit's audio session
+        try? audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
         try? audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
         let inputNode = audioEngine.inputNode
