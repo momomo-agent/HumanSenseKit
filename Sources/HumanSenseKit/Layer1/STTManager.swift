@@ -215,11 +215,17 @@ public class STTManager: NSObject, ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         
         let audioSession = AVAudioSession.sharedInstance()
-        // playAndRecord allows coexistence with ARKit's audio session
+        // Use the existing audio session category if ARKit already configured it.
+        // Only set category if not already playAndRecord (ARKit sets this for face tracking).
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            let currentCategory = audioSession.category
+            if currentCategory != .playAndRecord {
+                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+                NSLog("[STT] Audio session configured: playAndRecord (was %@)", currentCategory.rawValue)
+            } else {
+                NSLog("[STT] Audio session already playAndRecord, reusing")
+            }
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            NSLog("[STT] Audio session configured: playAndRecord")
         } catch {
             NSLog("[STT] Audio session error: %@", error.localizedDescription)
         }
