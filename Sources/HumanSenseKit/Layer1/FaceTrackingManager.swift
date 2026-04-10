@@ -9,6 +9,7 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var currentAnchor: ARFaceAnchor?
     @Published public var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
+    @Published public var arSessionReady = false
 
     /// The ARSession this manager reads from. Owned externally; FaceTrackingManager is a consumer.
     private var arSession: ARSession?
@@ -22,6 +23,7 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     private let emotionDetector = EmotionDetector()
     nonisolated(unsafe) private var noFaceFrames: Int = 0
     nonisolated(unsafe) private var untrackedFrames: Int = 0
+    nonisolated(unsafe) private var hasSignaledReady: Bool = false
     private let noFaceThreshold = 5
 
     public weak var handManager: HandGestureManager?
@@ -67,6 +69,14 @@ public class FaceTrackingManager: NSObject, ObservableObject {
 
 extension FaceTrackingManager: ARSessionDelegate {
     nonisolated public func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        // Signal that ARKit's audio session setup is done (first frame = session fully running)
+        if !hasSignaledReady {
+            hasSignaledReady = true
+            Task { @MainActor in
+                self.arSessionReady = true
+            }
+        }
+        
         guard let anchor = frame.anchors.first as? ARFaceAnchor else {
             noFaceFrames += 1
             if noFaceFrames >= noFaceThreshold {

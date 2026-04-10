@@ -207,11 +207,12 @@ public class STTManager: NSObject, ObservableObject {
     }
     
     private func configureAndStartAudioEngine() {
-        // Stop existing engine if running
+        // Stop existing engine and clean up
         if audioEngine.isRunning {
             audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
         }
+        // Always remove tap before reinstalling
+        audioEngine.inputNode.removeTap(onBus: 0)
         
         let audioSession = AVAudioSession.sharedInstance()
         // playAndRecord allows coexistence with ARKit's audio session
