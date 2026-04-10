@@ -62,6 +62,7 @@ public class STTManager: NSObject, ObservableObject {
     /// Apple Speech ~60s per-task limit.
     private var taskDurationTimer: Timer?
     private let maxTaskDuration: TimeInterval = 50.0
+    private var audioHealthTimer: Timer?
 
     public func captureSpeechStartState() {}
 
@@ -95,7 +96,12 @@ public class STTManager: NSObject, ObservableObject {
         silenceTimer = nil
         taskDurationTimer?.invalidate()
         taskDurationTimer = nil
+        audioHealthTimer?.invalidate()
+        audioHealthTimer = nil
         taskGeneration += 1
+        
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -263,14 +269,69 @@ public class STTManager: NSObject, ObservableObject {
         audioEngine.prepare()
         do {
             try audioEngine.start()
-            NSLog("[STT] Audio engine started successfully")
+            NSLog("[STT] Audio engine started successfully, isRunning=%d", audioEngine.isRunning ? 1 : 0)
         } catch {
             NSLog("[STT] Audio engine start failed: %@", error.localizedDescription)
         }
         isListening = true
+        
+        // Monitor audio session interruptions (e.g. from AVTRecordView)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption(_:)), name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange(_:)), name: AVAudioSession.routeChangeNotification, object: nil)
+        
+        // Periodic health check — detect if audio engine silently died
+        audioHealthTimer?.invalidate()
+        audioHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                let running = self.audioEngine.isRunning
+                let taskState = self.recognitionTask?.state.rawValue ?? -1
+                NSLog("[STT] Health: engine=%d, taskState=%d, taskGen=%d, isListening=%d",
+                      running ? 1 : 0, taskState, self.taskGeneration, self.isListening ? 1 : 0)
+                if !running && self.isListening {
+                    NSLog("[STT] ⚠️ Audio engine died! Restarting...")
+                    self.lastError = "Audio engine stopped unexpectedly, restarting"
+                    self.configureAndStartAudioEngine()
+                }
+            }
+        }
 
         startRecognitionTask()
         startSilenceTimer()
+    }
+    
+    // MARK: - Audio Session Monitoring
+    
+    @objc private func handleAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        switch type {
+        case .began:
+            NSLog("[STT] ⚠️ Audio session INTERRUPTED!")
+            Task { @MainActor in
+                self.lastError = "Audio session interrupted"
+            }
+        case .ended:
+            NSLog("[STT] Audio session interruption ended, restarting engine")
+            Task { @MainActor in
+                self.configureAndStartAudioEngine()
+            }
+        @unknown default:
+            break
+        }
+    }
+    
+    @objc private func handleRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
+        let session = AVAudioSession.sharedInstance()
+        NSLog("[STT] Audio route changed: reason=%d, category=%@, inputs=%@",
+              reasonValue, session.category.rawValue,
+              session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ","))
     }
 
     // MARK: - Recognition Task
