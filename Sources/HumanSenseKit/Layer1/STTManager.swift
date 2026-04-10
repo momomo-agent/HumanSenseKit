@@ -65,8 +65,12 @@ public class STTManager: NSObject, ObservableObject {
     public func captureSpeechStartState() {}
 
     public func start() {
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else { return }
+        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
+            NSLog("[STT] Speech recognizer not available")
+            return
+        }
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
+            NSLog("[STT] Authorization status: %d", status.rawValue)
             guard status == .authorized else { return }
             Task { @MainActor in
                 self?.beginListening()
@@ -177,15 +181,23 @@ public class STTManager: NSObject, ObservableObject {
     private func beginListening() {
         let audioSession = AVAudioSession.sharedInstance()
         // playAndRecord allows coexistence with ARKit's audio session
-        try? audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-        try? audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            NSLog("[STT] Audio session configured: playAndRecord")
+        } catch {
+            NSLog("[STT] Audio session error: %@", error.localizedDescription)
+        }
 
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
+            NSLog("[STT] Invalid recording format: sampleRate=%.0f channels=%d", recordingFormat.sampleRate, recordingFormat.channelCount)
             return
         }
+
+        NSLog("[STT] Recording format: sampleRate=%.0f channels=%d", recordingFormat.sampleRate, recordingFormat.channelCount)
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
@@ -196,7 +208,12 @@ public class STTManager: NSObject, ObservableObject {
         }
 
         audioEngine.prepare()
-        try? audioEngine.start()
+        do {
+            try audioEngine.start()
+            NSLog("[STT] Audio engine started successfully")
+        } catch {
+            NSLog("[STT] Audio engine start failed: %@", error.localizedDescription)
+        }
         isListening = true
 
         startRecognitionTask()

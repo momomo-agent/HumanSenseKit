@@ -31,8 +31,10 @@ public class FaceTrackingManager: NSObject, ObservableObject {
 
     public func start() {
         guard ARFaceTrackingConfiguration.isSupported else {
+            NSLog("[FaceTracking] ARFaceTracking NOT supported on this device")
             return
         }
+        NSLog("[FaceTracking] Starting ARSession for face tracking")
         let config = ARFaceTrackingConfiguration()
         config.worldAlignment = .camera
         arSession.delegate = self
@@ -176,6 +178,21 @@ extension FaceTrackingManager: ARSessionDelegate {
                     self.lastTrailAppend = now
                 }
             }
+        }
+    }
+
+    nonisolated public func session(_ session: ARSession, didFailWithError error: Error) {
+        NSLog("[FaceTracking] ARSession failed: %@", error.localizedDescription)
+    }
+
+    nonisolated public func sessionWasInterrupted(_ session: ARSession) {
+        NSLog("[FaceTracking] ARSession interrupted")
+    }
+
+    nonisolated public func sessionInterruptionEnded(_ session: ARSession) {
+        NSLog("[FaceTracking] ARSession interruption ended, restarting")
+        Task { @MainActor in
+            self.start()
         }
     }
 }
