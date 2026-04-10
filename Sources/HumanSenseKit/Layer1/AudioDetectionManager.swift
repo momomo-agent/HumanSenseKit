@@ -9,7 +9,7 @@ import Combine
 public class AudioDetectionManager: NSObject, ObservableObject {
     @Published public var audioState = AudioState()
 
-    private let speechThreshold: Float = 0.0015
+    private let speechThreshold: Float = 0.0008
     private var silenceTimer: Timer?
     private let silenceDelay: TimeInterval = 0.5
 

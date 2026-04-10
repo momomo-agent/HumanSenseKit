@@ -7,6 +7,7 @@ import AVFoundation
 public class STTManager: NSObject, ObservableObject {
     @Published public var segments: [SpeechSegment] = []
     @Published public var isListening: Bool = false
+    @Published public var lastError: String?
 
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -83,6 +84,7 @@ public class STTManager: NSObject, ObservableObject {
             }
             Task { @MainActor in
                 NSLog("[STT] Authorized, calling beginListening()")
+                self?.lastError = nil
                 self?.beginListening()
             }
         }
@@ -299,7 +301,9 @@ public class STTManager: NSObject, ObservableObject {
                     }
                 }
 
-                if error != nil && !(result?.isFinal ?? false) {
+                if let error = error, !(result?.isFinal ?? false) {
+                    NSLog("[STT] Recognition error: %@ (code=%d)", error.localizedDescription, (error as NSError).code)
+                    self.lastError = error.localizedDescription
                     self.taskGeneration += 1
                     let gen = self.taskGeneration
                     self.finalizeActiveSentence()
