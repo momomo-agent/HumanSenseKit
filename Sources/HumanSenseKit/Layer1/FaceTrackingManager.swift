@@ -7,9 +7,11 @@ import Combine
 public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var faceState = FaceState()
     @Published public var currentAnchor: ARFaceAnchor?
+    @Published public var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
 
-    private let arSession = ARSession()
+    /// The single ARSession — exposed so other consumers (AvatarKit, camera preview) can share it.
+    public let arSession = ARSession()
     private let processingQueue = DispatchQueue(label: "com.momomo.facetracking", qos: .userInitiated)
 
     private var gazeFilterX: LowPassFilter?
@@ -169,6 +171,7 @@ extension FaceTrackingManager: ARSessionDelegate {
                 self.faceState = newState
                 self.previousJawOpen = jawOpen
                 self.currentAnchor = anchor
+                self.currentFrame = frame
 
                 // Append gaze trail at ~10fps
                 let now = Date()

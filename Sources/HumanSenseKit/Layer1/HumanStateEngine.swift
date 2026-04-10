@@ -11,6 +11,8 @@ public class HumanStateEngine {
 
     // Expose for views that need ARFaceAnchor (FaceMeshView)
     public var currentFaceAnchor: ARFaceAnchor? { faceManager.currentAnchor }
+    /// The latest ARFrame — use for AvatarKit rendering and camera preview.
+    public var currentARFrame: ARFrame? { faceManager.currentFrame }
     public var gazeTrail: [CGPoint] { faceManager.gazeTrail }
 
     // --- Owned managers ---

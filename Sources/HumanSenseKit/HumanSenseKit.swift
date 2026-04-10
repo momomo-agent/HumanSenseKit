@@ -34,6 +34,11 @@ public class HumanSenseKit {
         engine.currentFaceAnchor
     }
     
+    /// The latest ARFrame — use for AvatarKit rendering and camera background.
+    public var currentARFrame: ARFrame? {
+        engine.currentARFrame
+    }
+    
     // MARK: - Debug UI
     
     #if DEBUG
