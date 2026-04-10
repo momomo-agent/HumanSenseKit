@@ -1,0 +1,12 @@
+{
+  "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/Sources/HumanSenseKit/DebugUI/HumanSenseDebugView.swift" : {
+    "abi-baseline-json" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit.abi.json",
+    "const-values" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit-primary.swiftconstvalues",
+    "dependencies" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit-primary.d",
+    "diagnostics" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit-primary.dia",
+    "objc-header" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit-Swift.h",
+    "swiftdoc" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit.swiftdoc",
+    "swiftmodule" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit.swiftmodule",
+    "swiftsourceinfo" : "/Users/kenefe/LOCAL/momo-agent/projects/HumanSenseKit/build/HumanSenseKit.build/Release-iphoneos/HumanSenseKit.build/Objects-normal/arm64/HumanSenseKit.swiftsourceinfo"
+  }
+}

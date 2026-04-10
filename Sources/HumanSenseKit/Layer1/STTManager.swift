@@ -41,7 +41,8 @@ public class STTManager: NSObject, ObservableObject {
         var text: String
         var startedLookingAtScreen: Bool
         var gazeSpans: [GazeSpan]
-        var isFromUser: Bool
+        /// Sticky flag: true once isSpeaking was true at any point during this sentence.
+        var everSpoke: Bool
     }
 
     private var sentences: [Sentence] = []
@@ -109,7 +110,7 @@ public class STTManager: NSObject, ObservableObject {
                     text: " ",
                     isToScreen: false,
                     sentenceStartedLookingAtScreen: s.startedLookingAtScreen,
-                    isFromUser: s.isFromUser
+                    isFromUser: s.everSpoke
                 ))
             }
 
@@ -119,7 +120,7 @@ public class STTManager: NSObject, ObservableObject {
                     text: s.text,
                     isToScreen: false,
                     sentenceStartedLookingAtScreen: false,
-                    isFromUser: s.isFromUser
+                    isFromUser: s.everSpoke
                 ))
             } else {
                 var offset = s.text.startIndex
@@ -132,7 +133,7 @@ public class STTManager: NSObject, ObservableObject {
                             text: spanText,
                             isToScreen: span.isToScreen,
                             sentenceStartedLookingAtScreen: true,
-                            isFromUser: s.isFromUser
+                            isFromUser: s.everSpoke
                         ))
                     }
                     offset = end
@@ -144,7 +145,7 @@ public class STTManager: NSObject, ObservableObject {
                             text: remaining,
                             isToScreen: s.gazeSpans.last?.isToScreen ?? true,
                             sentenceStartedLookingAtScreen: true,
-                            isFromUser: s.isFromUser
+                            isFromUser: s.everSpoke
                         ))
                     }
                 }
@@ -277,7 +278,7 @@ public class STTManager: NSObject, ObservableObject {
     }
 
     private func resetActiveSentence() {
-        activeSentence = Sentence(text: "", startedLookingAtScreen: false, gazeSpans: [], isFromUser: false)
+        activeSentence = Sentence(text: "", startedLookingAtScreen: false, gazeSpans: [], everSpoke: false)
         lastCharCount = 0
         speechStartCaptured = false
         lastRecognitionTime = nil
@@ -302,10 +303,12 @@ public class STTManager: NSObject, ObservableObject {
         activeSentence?.text = newText
         lastRecognitionTime = Date()
 
+        // Sticky: once user is physically speaking during this sentence, mark it
+        if isSpeaking { activeSentence?.everSpoke = true }
+
         if !speechStartCaptured && !newText.isEmpty {
             let looking = isSpeaking ? gazeAtSpeechOnset : false
             activeSentence?.startedLookingAtScreen = looking
-            activeSentence?.isFromUser = isSpeaking
             if looking {
                 activeSentence?.gazeSpans = [GazeSpan(charCount: newCharCount, isToScreen: isLookingAtScreen)]
             }

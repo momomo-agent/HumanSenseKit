@@ -1,0 +1,4 @@
+module HumanSenseKit {
+header "HumanSenseKit-Swift.h"
+export *
+}
