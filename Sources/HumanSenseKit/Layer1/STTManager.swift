@@ -12,10 +12,18 @@ public class STTManager: NSObject, ObservableObject {
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let _audioEngine = AVAudioEngine()
+    private var _audioEngine = AVAudioEngine()
 
-    /// Shared audio engine — use to attach AVAudioPlayerNode for concurrent playback.
-    public var audioEngine: AVAudioEngine { _audioEngine }
+    /// The audio engine used for recording. Can be replaced with an external
+    /// engine (e.g. a shared AudioBus) before calling `start()`.
+    public var audioEngine: AVAudioEngine {
+        get { _audioEngine }
+        set { _audioEngine = newValue }
+    }
+
+    /// When true, STTManager will NOT configure AVAudioSession, enable AEC,
+    /// or start/stop the engine — the external owner handles engine lifecycle.
+    public var usesExternalEngine = false
 
     /// AudioDetectionManager receives buffers from our shared tap.
     public weak var audioDetectionManager: AudioDetectionManager?
@@ -111,7 +119,9 @@ public class STTManager: NSObject, ObservableObject {
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
 
-        audioEngine.stop()
+        if !usesExternalEngine {
+            audioEngine.stop()
+        }
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
@@ -240,30 +250,30 @@ public class STTManager: NSObject, ObservableObject {
     }
     
     private func configureAndStartAudioEngine() {
-        // Stop existing engine and clean up
-        if _audioEngine.isRunning {
-            audioEngine.stop()
+        if !usesExternalEngine {
+            // Stop existing engine and clean up
+            if _audioEngine.isRunning {
+                audioEngine.stop()
+            }
         }
         // Always remove tap before reinstalling
         audioEngine.inputNode.removeTap(onBus: 0)
         
-        let audioSession = AVAudioSession.sharedInstance()
-        // Use the existing audio session category if ARKit already configured it.
-        // Only set category if not already playAndRecord (ARKit sets this for face tracking).
-        do {
-            let currentCategory = audioSession.category
-            if currentCategory != .playAndRecord {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-                NSLog("[STT] Audio session configured: playAndRecord (was %@)", currentCategory.rawValue)
-            } else {
-                NSLog("[STT] Audio session already playAndRecord, reusing")
+        if !usesExternalEngine {
+            let audioSession = AVAudioSession.sharedInstance()
+            do {
+                let currentCategory = audioSession.category
+                if currentCategory != .playAndRecord {
+                    try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+                    NSLog("[STT] Audio session configured: playAndRecord (was %@)", currentCategory.rawValue)
+                } else {
+                    NSLog("[STT] Audio session already playAndRecord, reusing")
+                }
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                try audioSession.overrideOutputAudioPort(.speaker)
+            } catch {
+                NSLog("[STT] Audio session error: %@", error.localizedDescription)
             }
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            // Always route to speaker — without this, reconfiguring the session
-            // can silently switch output to the earpiece, making TTS barely audible.
-            try audioSession.overrideOutputAudioPort(.speaker)
-        } catch {
-            NSLog("[STT] Audio session error: %@", error.localizedDescription)
         }
 
         let inputNode = audioEngine.inputNode
@@ -288,12 +298,14 @@ public class STTManager: NSObject, ObservableObject {
             }
         }
 
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-            NSLog("[STT] Audio engine started successfully, isRunning=%d", audioEngine.isRunning ? 1 : 0)
-        } catch {
-            NSLog("[STT] Audio engine start failed: %@", error.localizedDescription)
+        if !usesExternalEngine {
+            audioEngine.prepare()
+            do {
+                try audioEngine.start()
+                NSLog("[STT] Audio engine started successfully, isRunning=%d", audioEngine.isRunning ? 1 : 0)
+            } catch {
+                NSLog("[STT] Audio engine start failed: %@", error.localizedDescription)
+            }
         }
         isListening = true
         
@@ -310,10 +322,13 @@ public class STTManager: NSObject, ObservableObject {
                 let taskState = self.recognitionTask?.state.rawValue ?? -1
                 NSLog("[STT] Health: engine=%d, taskState=%d, taskGen=%d, isListening=%d",
                       running ? 1 : 0, taskState, self.taskGeneration, self.isListening ? 1 : 0)
-                if !running && self.isListening {
+                if !running && self.isListening && !self.usesExternalEngine {
                     NSLog("[STT] ⚠️ Audio engine died! Restarting...")
                     self.lastError = "Audio engine stopped unexpectedly, restarting"
                     self.configureAndStartAudioEngine()
+                } else if !running && self.isListening && self.usesExternalEngine {
+                    NSLog("[STT] ⚠️ External audio engine stopped — waiting for owner to restart")
+                    self.lastError = "External audio engine stopped"
                 }
             }
         }
