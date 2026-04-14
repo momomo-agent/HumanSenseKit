@@ -85,6 +85,11 @@ extension FaceTrackingManager: ARSessionDelegate {
         
         guard let anchor = frame.anchors.first as? ARFaceAnchor else {
             noFaceFrames += 1
+            // Always save frame for camera capture (even without face)
+            Task { @MainActor in
+                self.currentFrame = frame
+                self.onARFrame?(frame)
+            }
             if noFaceFrames >= noFaceThreshold {
                 Task { @MainActor in
                     self.faceState.faceDetected = false

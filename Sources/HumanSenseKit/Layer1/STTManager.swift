@@ -64,6 +64,11 @@ public class STTManager: NSObject, ObservableObject {
     private let maxTaskDuration: TimeInterval = 50.0
     private var audioHealthTimer: Timer?
 
+    // --- Audio engine retry ---
+    private var audioEngineRetryCount: Int = 0
+    private let maxAudioEngineRetries: Int = 3
+    private let audioEngineRetryDelay: TimeInterval = 0.5
+
     public func captureSpeechStartState() {}
 
     public func start() {
@@ -259,9 +264,11 @@ public class STTManager: NSObject, ObservableObject {
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
-            NSLog("[STT] Invalid recording format: sampleRate=%.0f channels=%d", recordingFormat.sampleRate, recordingFormat.channelCount)
+            NSLog("[STT] Invalid recording format: sampleRate=%.0f channels=%d — will retry", recordingFormat.sampleRate, recordingFormat.channelCount)
+            retryAudioEngineStart()
             return
         }
+        audioEngineRetryCount = 0  // Reset on success
 
         NSLog("[STT] Recording format: sampleRate=%.0f channels=%d", recordingFormat.sampleRate, recordingFormat.channelCount)
 
@@ -305,6 +312,22 @@ public class STTManager: NSObject, ObservableObject {
 
         startRecognitionTask()
         startSilenceTimer()
+    }
+
+    private func retryAudioEngineStart() {
+        audioEngineRetryCount += 1
+        guard audioEngineRetryCount <= maxAudioEngineRetries else {
+            NSLog("[STT] ❌ Audio engine failed after %d retries — giving up", maxAudioEngineRetries)
+            return
+        }
+        let attempt = audioEngineRetryCount
+        let delay = audioEngineRetryDelay * Double(attempt)
+        NSLog("[STT] Scheduling audio engine retry %d/%d in %.1fs", attempt, maxAudioEngineRetries, delay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            NSLog("[STT] Retrying audio engine start (attempt %d/%d)", attempt, self.maxAudioEngineRetries)
+            self.configureAndStartAudioEngine()
+        }
     }
     
     @objc private func handleRouteChange(_ notification: Notification) {
