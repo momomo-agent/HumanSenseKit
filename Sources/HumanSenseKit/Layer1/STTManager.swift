@@ -12,7 +12,10 @@ public class STTManager: NSObject, ObservableObject {
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
+    private let _audioEngine = AVAudioEngine()
+
+    /// Shared audio engine — use to attach AVAudioPlayerNode for concurrent playback.
+    public var audioEngine: AVAudioEngine { _audioEngine }
 
     /// AudioDetectionManager receives buffers from our shared tap.
     public weak var audioDetectionManager: AudioDetectionManager?
@@ -238,7 +241,7 @@ public class STTManager: NSObject, ObservableObject {
     
     private func configureAndStartAudioEngine() {
         // Stop existing engine and clean up
-        if audioEngine.isRunning {
+        if _audioEngine.isRunning {
             audioEngine.stop()
         }
         // Always remove tap before reinstalling
