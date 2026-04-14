@@ -256,6 +256,9 @@ public class STTManager: NSObject, ObservableObject {
                 NSLog("[STT] Audio session already playAndRecord, reusing")
             }
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            // Always route to speaker — without this, reconfiguring the session
+            // can silently switch output to the earpiece, making TTS barely audible.
+            try audioSession.overrideOutputAudioPort(.speaker)
         } catch {
             NSLog("[STT] Audio session error: %@", error.localizedDescription)
         }
