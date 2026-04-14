@@ -272,7 +272,9 @@ public class STTManager: NSObject, ObservableObject {
 
         NSLog("[STT] Recording format: sampleRate=%.0f channels=%d", recordingFormat.sampleRate, recordingFormat.channelCount)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+        // Pass nil for format to let AVAudioEngine use the hardware's current format.
+        // Avoids "format mismatch" crash when ARKit has reconfigured the audio session.
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             guard let self = self else { return }
             self.recognitionRequest?.append(buffer)
             Task { @MainActor in
