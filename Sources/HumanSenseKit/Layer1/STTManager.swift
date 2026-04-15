@@ -68,7 +68,7 @@ public class STTManager: NSObject, ObservableObject {
     // --- Silence detection ---
     private var lastRecognitionTime: Date?
     private var silenceTimer: Timer?
-    private let sentenceGapThreshold: TimeInterval = 1.5
+    private let sentenceGapThreshold: TimeInterval = 1.0
 
     /// Apple Speech ~60s per-task limit.
     private var taskDurationTimer: Timer?
@@ -143,13 +143,14 @@ public class STTManager: NSObject, ObservableObject {
     private func rebuildSegments() {
         var result: [SpeechSegment] = []
 
-        func appendSentence(_ s: Sentence) {
+        func appendSentence(_ s: Sentence, isFinal: Bool) {
             if !result.isEmpty {
                 result.append(SpeechSegment(
                     text: " ",
                     isToScreen: false,
                     sentenceStartedLookingAtScreen: s.startedLookingAtScreen,
-                    isFromUser: s.isFromUser
+                    isFromUser: s.isFromUser,
+                    isFinal: isFinal
                 ))
             }
 
@@ -159,7 +160,8 @@ public class STTManager: NSObject, ObservableObject {
                     text: s.text,
                     isToScreen: false,
                     sentenceStartedLookingAtScreen: false,
-                    isFromUser: s.isFromUser
+                    isFromUser: s.isFromUser,
+                    isFinal: isFinal
                 ))
             } else {
                 var offset = s.text.startIndex
@@ -172,7 +174,8 @@ public class STTManager: NSObject, ObservableObject {
                             text: spanText,
                             isToScreen: span.isToScreen,
                             sentenceStartedLookingAtScreen: true,
-                            isFromUser: s.isFromUser
+                            isFromUser: s.isFromUser,
+                            isFinal: isFinal
                         ))
                     }
                     offset = end
@@ -184,15 +187,16 @@ public class STTManager: NSObject, ObservableObject {
                             text: remaining,
                             isToScreen: s.gazeSpans.last?.isToScreen ?? true,
                             sentenceStartedLookingAtScreen: true,
-                            isFromUser: s.isFromUser
+                            isFromUser: s.isFromUser,
+                            isFinal: isFinal
                         ))
                     }
                 }
             }
         }
 
-        for s in sentences { appendSentence(s) }
-        if let active = activeSentence, !active.text.isEmpty { appendSentence(active) }
+        for s in sentences { appendSentence(s, isFinal: true) }
+        if let active = activeSentence, !active.text.isEmpty { appendSentence(active, isFinal: false) }
 
         segments = result
     }

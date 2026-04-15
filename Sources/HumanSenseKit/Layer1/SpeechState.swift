@@ -8,13 +8,16 @@ public struct SpeechSegment: Identifiable {
     public let sentenceStartedLookingAtScreen: Bool
     /// true = user's own speech (mouth moving + audio), false = ambient/other people
     public let isFromUser: Bool
+    /// true = sentence has been finalized (silence gap detected), text won't change anymore
+    public let isFinal: Bool
 
-    public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool, isFromUser: Bool = false) {
+    public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool, isFromUser: Bool = false, isFinal: Bool = false) {
         self.id = id
         self.text = text
         self.isToScreen = isToScreen
         self.sentenceStartedLookingAtScreen = sentenceStartedLookingAtScreen
         self.isFromUser = isFromUser
+        self.isFinal = isFinal
     }
 }
 
