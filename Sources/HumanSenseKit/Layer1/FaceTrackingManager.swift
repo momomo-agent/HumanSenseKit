@@ -30,6 +30,8 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     nonisolated(unsafe) private var noFaceFrames: Int = 0
     nonisolated(unsafe) private var untrackedFrames: Int = 0
     nonisolated(unsafe) private var hasSignaledReady: Bool = false
+    nonisolated(unsafe) private var cachedOrientation: UIInterfaceOrientation = .portrait
+    nonisolated(unsafe) private var cachedScreenSize: CGSize = CGSize(width: 390, height: 844)
     private let noFaceThreshold = 5
 
     public weak var handManager: HandGestureManager?
@@ -80,6 +82,11 @@ extension FaceTrackingManager: ARSessionDelegate {
             hasSignaledReady = true
             Task { @MainActor in
                 self.arSessionReady = true
+                // Cache UIKit values for use on processing queue
+                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                    self.cachedOrientation = scene.windows.first?.windowScene?.interfaceOrientation ?? .portrait
+                }
+                self.cachedScreenSize = UIScreen.main.bounds.size
             }
         }
         
@@ -120,16 +127,15 @@ extension FaceTrackingManager: ARSessionDelegate {
 
             let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
 
-            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let orientation = scene.windows.first?.windowScene?.interfaceOrientation else { return }
+            let orientation = self.cachedOrientation
+            let size = self.cachedScreenSize
 
             let lookPoint = frame.camera.projectPoint(
                 SIMD3<Float>(x: lookAtVector.x, y: lookAtVector.y, z: lookAtVector.z),
                 orientation: orientation,
-                viewportSize: UIScreen.main.bounds.size
+                viewportSize: size
             )
 
-            let size = UIScreen.main.bounds.size
             let adjusted = (x: size.width - lookPoint.x, y: size.height - lookPoint.y)
 
             let bs = anchor.blendShapes
@@ -148,7 +154,15 @@ extension FaceTrackingManager: ARSessionDelegate {
             let eyeLookUpR = bs[.eyeLookUpRight]?.floatValue ?? 0
             let eyeLookDownR = bs[.eyeLookDownRight]?.floatValue ?? 0
 
-            Task { @MainActor in
+            let distance = abs(anchor.transform.columns.3.z)
+
+            // Dispatch state update to main — use async to avoid retaining ARFrame in queued Tasks
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+
+                let headGesture = self.headGestureDetector.update(yaw: yaw, pitch: pitch, roll: roll)
+                let emotion = self.emotionDetector.detectEmotion(from: anchor.blendShapes, isSpeaking: false)
+
                 if self.gazeFilterX == nil {
                     self.gazeFilterX = LowPassFilter(value: adjusted.x)
                     self.gazeFilterY = LowPassFilter(value: adjusted.y)
@@ -165,21 +179,17 @@ extension FaceTrackingManager: ARSessionDelegate {
                 newState.headYaw = yaw
                 newState.headPitch = pitch
                 newState.headRoll = roll
+                newState.headGesture = headGesture
+                newState.emotion = emotion
+                newState.distanceFromCamera = distance
 
-                newState.headGesture = self.headGestureDetector.update(yaw: yaw, pitch: pitch, roll: roll)
-
-                newState.emotion = self.emotionDetector.detectEmotion(from: anchor.blendShapes, isSpeaking: false)
-
-                newState.distanceFromCamera = abs(anchor.transform.columns.3.z)
-
-                let screenSize = UIScreen.main.bounds.size
                 let marginRatio: CGFloat = 0.1
-                let marginX = screenSize.width * marginRatio
-                let marginY = screenSize.height * marginRatio
+                let marginX = size.width * marginRatio
+                let marginY = size.height * marginRatio
                 let gazeX = self.gazeFilterX?.value ?? adjusted.x
                 let gazeY = self.gazeFilterY?.value ?? adjusted.y
-                let gazeInCenter = gazeX > marginX && gazeX < screenSize.width - marginX &&
-                                   gazeY > marginY && gazeY < screenSize.height - marginY
+                let gazeInCenter = gazeX > marginX && gazeX < size.width - marginX &&
+                                   gazeY > marginY && gazeY < size.height - marginY
                 newState.isLookingAtScreen = gazeInCenter
 
                 newState.jawOpen = jawOpen
