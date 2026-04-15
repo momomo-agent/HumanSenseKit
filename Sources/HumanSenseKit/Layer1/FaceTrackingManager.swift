@@ -6,15 +6,16 @@ import Combine
 @MainActor
 public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var faceState = FaceState()
-    @Published public var currentAnchor: ARFaceAnchor?
-    /// Latest ARFrame — NOT @Published to avoid 60fps SwiftUI redraws.
-    /// Access directly; use onARFrame callback for real-time consumers.
-    public private(set) var currentFrame: ARFrame?
+    /// Latest ARFaceAnchor — updated on processingQueue, read from any thread.
+    public nonisolated(unsafe) var currentAnchor: ARFaceAnchor?
+    /// Latest ARFrame — updated on processingQueue, read from any thread.
+    /// NOT @Published to avoid 60fps SwiftUI redraws.
+    public nonisolated(unsafe) var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
     @Published public var arSessionReady = false
-    
-    /// Real-time ARFrame callback for UIKit consumers (e.g. AvatarKit).
-    /// Called on main thread at ARKit frame rate (~60fps).
+
+    /// Real-time ARFrame callback for consumers (e.g. AvatarKit).
+    /// Called on processingQueue (background) at ARKit frame rate (~60fps).
     public var onARFrame: ((ARFrame) -> Void)?
 
     /// The ARSession this manager reads from. Owned externally; FaceTrackingManager is a consumer.
@@ -156,12 +157,17 @@ extension FaceTrackingManager: ARSessionDelegate {
 
             let distance = abs(anchor.transform.columns.3.z)
 
-            // Dispatch state update to main — use async to avoid retaining ARFrame in queued Tasks
+            // Store frame/anchor on processing queue — no main thread dispatch needed
+            self.currentAnchor = anchor
+            self.currentFrame = frame
+            self.onARFrame?(frame)
+
+            // Dispatch only UI state update to main (no ARFrame/anchor captured)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
 
                 let headGesture = self.headGestureDetector.update(yaw: yaw, pitch: pitch, roll: roll)
-                let emotion = self.emotionDetector.detectEmotion(from: anchor.blendShapes, isSpeaking: false)
+                let emotion = self.emotionDetector.detectEmotion(from: bs, isSpeaking: false)
 
                 if self.gazeFilterX == nil {
                     self.gazeFilterX = LowPassFilter(value: adjusted.x)
@@ -210,9 +216,6 @@ extension FaceTrackingManager: ARSessionDelegate {
 
                 self.faceState = newState
                 self.previousJawOpen = jawOpen
-                self.currentAnchor = anchor
-                self.currentFrame = frame
-                self.onARFrame?(frame)
 
                 // Append gaze trail at ~10fps
                 let now = Date()
