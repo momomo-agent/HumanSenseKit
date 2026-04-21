@@ -61,9 +61,13 @@ public class SentenceBuilder {
         lastRecognitionTime = Date()
         
         if !speechStartCaptured && !text.isEmpty {
-            let looking = isSpeaking ? gazeAtSpeechOnset : false
+            // When speech starts, isSpeaking may not have updated yet
+            // (audio detection lags behind recognition). Default to true
+            // if we're receiving text — someone is speaking.
+            let speaking = isSpeaking || !text.isEmpty
+            let looking = speaking ? (isSpeaking ? gazeAtSpeechOnset : isLookingAtScreen) : false
             activeSentence?.startedLookingAtScreen = looking
-            activeSentence?.isFromUser = isSpeaking
+            activeSentence?.isFromUser = speaking
             if looking {
                 activeSentence?.gazeSpans = [GazeSpan(charCount: newCharCount, isToScreen: isLookingAtScreen)]
             }
