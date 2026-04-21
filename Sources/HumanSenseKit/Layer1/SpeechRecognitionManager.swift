@@ -66,8 +66,6 @@ public class SpeechRecognitionManager {
         self.inputContinuation = continuation
 
         // Consume results — detached so Speech framework runs on its own queue
-        let onResult = self.onResult
-        let onError = self.onError
         resultTask = Task.detached { [weak self] in
             do {
                 for try await result in transcriber.results {
@@ -77,7 +75,7 @@ public class SpeechRecognitionManager {
                     let isFinal = result.isFinal
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
                     await MainActor.run {
-                        onResult?(text, isFinal)
+                        self?.onResult?(text, isFinal)
                     }
                 }
             } catch {
@@ -86,7 +84,7 @@ public class SpeechRecognitionManager {
                 guard gen == myGeneration else { return }
                 print("[Speech] Error gen=\(myGeneration): \(error.localizedDescription)")
                 await MainActor.run {
-                    onError?(error)
+                    self?.onError?(error)
                 }
             }
         }
@@ -116,7 +114,7 @@ public class SpeechRecognitionManager {
                 guard gen4 == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
                 await MainActor.run {
-                    onError?(error)
+                    self?.onError?(error)
                 }
             }
         }
