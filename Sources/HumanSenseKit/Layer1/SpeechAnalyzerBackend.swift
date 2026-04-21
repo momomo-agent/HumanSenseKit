@@ -8,7 +8,7 @@ import AVFoundation
 /// Uses SpeechTranscriber (preferred for live audio) with volatile results.
 /// Falls back to DictationTranscriber if SpeechTranscriber is unavailable.
 @MainActor
-public class SpeechRecognitionManager {
+final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     private var resultTask: Task<Void, Never>?
@@ -20,8 +20,8 @@ public class SpeechRecognitionManager {
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
 
-    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
-    public var onError: ((Error) -> Void)?
+    var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+    var onError: ((Error) -> Void)?
 
     /// Called from audio render thread — must be nonisolated.
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {

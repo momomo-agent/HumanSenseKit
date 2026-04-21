@@ -35,12 +35,12 @@ public class HumanStateEngine {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
-    public init() {
+    public init(sttBackend: STTManager.BackendType = .speechAnalyzer) {
         self.faceManager = FaceTrackingManager()
         self.audioManager = AudioDetectionManager()
         self.handManager = HandGestureManager()
         self.deviceMotionManager = DeviceMotionManager()
-        self.sttManager = STTManager()
+        self.sttManager = STTManager(backend: sttBackend)
 
         // Wire up face → hand (ARFrame sharing)
         faceManager.handManager = handManager

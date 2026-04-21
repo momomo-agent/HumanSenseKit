@@ -5,20 +5,25 @@ import AVFoundation
 
 /// STTManager — thin orchestrator composing three layers:
 ///   Layer 0: AudioEngineManager  (audio lifecycle)
-///   Layer 1: SpeechRecognitionManager  (SpeechAnalyzer + DictationTranscriber)
+///   Layer 1: SpeechRecognitionBackend  (SpeechAnalyzer or SFSpeechRecognizer)
 ///   Layer 2: SentenceBuilder  (sentence model + gaze tracking)
-///
-/// With iOS 26 SpeechAnalyzer, we no longer need manual silence splitting.
-/// Apple handles volatile→final transitions automatically.
 @MainActor
 public class STTManager: NSObject, ObservableObject {
     @Published public var segments: [SpeechSegment] = []
     @Published public var isListening: Bool = false
     @Published public var lastError: String?
 
+    /// Which speech recognition engine to use.
+    public enum BackendType: Sendable {
+        /// iOS 26 SpeechAnalyzer (default).
+        case speechAnalyzer
+        /// Legacy SFSpeechRecognizer (fallback).
+        case sfSpeechRecognizer
+    }
+
     // --- Sub-components ---
     private let audio = AudioEngineManager()
-    private let speech = SpeechRecognitionManager()
+    private let speech: any SpeechRecognitionBackend
     private let builder = SentenceBuilder()
 
     /// The audio engine. Can be replaced before calling start().
@@ -45,6 +50,20 @@ public class STTManager: NSObject, ObservableObject {
     }
 
     public func captureSpeechStartState() {}
+
+    // MARK: - Init
+
+    /// Create an STTManager with the specified backend.
+    /// Defaults to `.speechAnalyzer` (iOS 26).
+    public init(backend: BackendType = .speechAnalyzer) {
+        switch backend {
+        case .speechAnalyzer:
+            self.speech = SpeechAnalyzerBackend()
+        case .sfSpeechRecognizer:
+            self.speech = SFSpeechBackend()
+        }
+        super.init()
+    }
 
     // MARK: - Lifecycle
 
