@@ -34,15 +34,18 @@ public class SpeechRecognitionManager {
         if buffer.format == format {
             continuation.yield(AnalyzerInput(buffer: buffer))
         } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
-            let frameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate
-            )
-            guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
-            do {
-                try converter.convert(to: converted, from: buffer)
+            // Calculate output frame count with ceiling to avoid underallocation
+            let ratio = format.sampleRate / buffer.format.sampleRate
+            let frameCount = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio))
+            guard frameCount > 0,
+                  let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+            var error: NSError?
+            converter.convert(to: converted, error: &error) { _, outStatus in
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            if error == nil && converted.frameLength > 0 {
                 continuation.yield(AnalyzerInput(buffer: converted))
-            } catch {
-                continuation.yield(AnalyzerInput(buffer: buffer))
             }
         } else {
             continuation.yield(AnalyzerInput(buffer: buffer))
