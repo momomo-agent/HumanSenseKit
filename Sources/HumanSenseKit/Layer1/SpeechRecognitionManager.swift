@@ -56,9 +56,10 @@ public final class SpeechRecognitionManager: @unchecked Sendable {
         let onResult = self.onResult
         let onError = self.onError
 
-        // Apple pattern: start result consumption BEFORE analyzer.start()
-        // Use plain Task (not detached) — matches Apple sample exactly
-        resultTask = Task {
+        // Result consumption BEFORE analyzer.start() (Apple pattern)
+        // Must be detached — if called from @MainActor context, plain Task
+        // inherits MainActor, causing dispatch_assert on SpeechAnalyzer's queue
+        resultTask = Task.detached {
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
