@@ -3,204 +3,82 @@ import Foundation
 import Speech
 import AVFoundation
 
-/// Layer 1: Speech recognition using iOS 26 SpeechAnalyzer.
+/// Layer 1: Speech recognition using SFSpeechRecognizer (stable, pre-iOS 26).
 ///
-/// Modeled after Apple's official sample code (WWDC25 session 277).
-/// All SpeechAnalyzer interactions happen in a detached task to avoid
-/// any actor context interference with SpeechAnalyzer's internal executor.
-public final class SpeechRecognitionManager: @unchecked Sendable {
-    private var analyzer: SpeechAnalyzer?
-    private var transcriber: SpeechTranscriber?
-    private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
-    private var resultTask: Task<Void, Error>?
-    private var analyzerTask: Task<Void, Never>?
-    private var analyzerFormat: AVAudioFormat?
-    private var bufferConverter = BufferConverter()
+/// SpeechAnalyzer (iOS 26) has dispatch_assert_queue crashes in beta.
+/// Falling back to SFSpeechRecognizer until iOS 26 stabilizes.
+@MainActor
+public class SpeechRecognitionManager {
+    private var recognizer: SFSpeechRecognizer?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
 
-    public var onResult: (@MainActor (_ text: String, _ isFinal: Bool) -> Void)?
-    public var onError: (@MainActor (Error) -> Void)?
+    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+    public var onError: ((Error) -> Void)?
 
-    /// Append audio buffer. Called from audio engine thread.
-    func appendBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let analyzerFormat, let inputContinuation else { return }
-        do {
-            let converted = try bufferConverter.convertBuffer(buffer, to: analyzerFormat)
-            inputContinuation.yield(AnalyzerInput(buffer: converted))
-        } catch {
-            inputContinuation.yield(AnalyzerInput(buffer: buffer))
-        }
+    /// Append audio buffer to the recognition request.
+    nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
+        recognitionRequest?.append(buffer)
     }
 
-    /// Start the analyzer. Safe to call multiple times.
-    func startTask() async {
-        await stop()
+    /// Start recognition. Safe to call multiple times.
+    func startTask() {
+        stopRecognition()
 
-        print("[Speech] startTask")
+        print("[Speech] startTask (SFSpeechRecognizer)")
 
-        let transcriber = SpeechTranscriber(
-            locale: Locale(identifier: "zh-CN"),
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: []
-        )
-        self.transcriber = transcriber
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+        self.recognizer = recognizer
 
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        self.analyzer = analyzer
+        guard let recognizer, recognizer.isAvailable else {
+            print("[Speech] Recognizer not available")
+            return
+        }
 
-        self.analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+        self.recognitionRequest = request
 
-        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        self.inputContinuation = continuation
-
-        let onResult = self.onResult
-        let onError = self.onError
-
-        // Result consumption BEFORE analyzer.start() (Apple pattern)
-        // Must be detached — if called from @MainActor context, plain Task
-        // inherits MainActor, causing dispatch_assert on SpeechAnalyzer's queue
-        resultTask = Task.detached {
-            do {
-                for try await result in transcriber.results {
-                    let text = String(result.text.characters)
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let result {
+                    let text = result.bestTranscription.formattedString
                     let isFinal = result.isFinal
                     print("[Speech] '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    if let onResult {
-                        await onResult(text, isFinal)
+                    self.onResult?(text, isFinal)
+                    if isFinal {
+                        self.stopRecognition()
                     }
                 }
-            } catch {
-                guard !Task.isCancelled else { return }
-                print("[Speech] Error: \(error.localizedDescription)")
-                if let onError {
-                    await onError(error)
-                }
-            }
-        }
-
-        // Run analyzer.start() in a detached context — no actor inheritance.
-        // This is critical: SpeechAnalyzer is an actor and its start() must
-        // not be called from within another actor's context.
-        analyzerTask = Task.detached { [weak self] in
-            do {
-                try await analyzer.start(inputSequence: stream)
-                print("[Speech] Analyzer started")
-            } catch {
-                guard !Task.isCancelled else { return }
-                print("[Speech] Analyzer start failed: \(error.localizedDescription)")
-                if let onError {
-                    await onError(error)
+                if let error {
+                    print("[Speech] Error: \(error.localizedDescription)")
+                    self.onError?(error)
+                    self.stopRecognition()
                 }
             }
         }
     }
 
-    func stop() async {
-        inputContinuation?.finish()
-        inputContinuation = nil
-
-        // Also detach the finalize call to avoid actor context issues
-        if let analyzer {
-            let a = analyzer
-            await Task.detached {
-                try? await a.finalizeAndFinishThroughEndOfInput()
-            }.value
-        }
-
-        resultTask?.cancel()
-        resultTask = nil
-        analyzerTask?.cancel()
-        analyzerTask = nil
-        analyzer = nil
-        transcriber = nil
-        analyzerFormat = nil
+    /// Stop recognition and clean up.
+    func stop() {
+        stopRecognition()
     }
 
+    private func stopRecognition() {
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognizer = nil
+    }
+
+    /// Request authorization.
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
-        Task.detached {
-            let locale = Locale(identifier: "zh-CN")
-            let supported = await SpeechTranscriber.supportedLocales
-            guard supported.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) else {
-                print("[Speech] zh-CN not supported")
-                completion(false)
-                return
-            }
-
-            let installed = await SpeechTranscriber.installedLocales
-            if !installed.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) {
-                print("[Speech] zh-CN model not installed, attempting download...")
-                let transcriber = SpeechTranscriber(
-                    locale: locale,
-                    transcriptionOptions: [],
-                    reportingOptions: [.volatileResults],
-                    attributeOptions: []
-                )
-                if let downloader = try? await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                    do {
-                        try await downloader.downloadAndInstall()
-                        print("[Speech] Model downloaded")
-                    } catch {
-                        print("[Speech] Model download failed: \(error.localizedDescription)")
-                        completion(false)
-                        return
-                    }
-                }
-            }
-
-            print("[Speech] Authorized and ready")
-            completion(true)
+        SFSpeechRecognizer.requestAuthorization { status in
+            completion(status == .authorized)
         }
-    }
-}
-
-// MARK: - Buffer Converter (from Apple sample code)
-
-private final class BufferConverter: @unchecked Sendable {
-    private var converter: AVAudioConverter?
-
-    func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {
-        let inputFormat = buffer.format
-        guard inputFormat != format else { return buffer }
-
-        if converter == nil || converter?.outputFormat != format {
-            converter = AVAudioConverter(from: inputFormat, to: format)
-            converter?.primeMethod = .none
-        }
-
-        guard let converter else { throw ConversionError.failedToCreateConverter }
-
-        let sampleRateRatio = converter.outputFormat.sampleRate / converter.inputFormat.sampleRate
-        let scaledLength = Double(buffer.frameLength) * sampleRateRatio
-        let frameCapacity = AVAudioFrameCount(scaledLength.rounded(.up))
-        guard let conversionBuffer = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: frameCapacity) else {
-            throw ConversionError.failedToCreateBuffer
-        }
-
-        var nsError: NSError?
-        let state = ConversionState()
-
-        let status = converter.convert(to: conversionBuffer, error: &nsError) { _, inputStatusPointer in
-            if state.processed {
-                inputStatusPointer.pointee = .noDataNow
-                return nil
-            }
-            state.processed = true
-            inputStatusPointer.pointee = .haveData
-            return buffer
-        }
-
-        guard status != .error else { throw ConversionError.conversionFailed(nsError) }
-        return conversionBuffer
-    }
-
-    private class ConversionState {
-        var processed = false
-    }
-
-    enum ConversionError: Error {
-        case failedToCreateConverter
-        case failedToCreateBuffer
-        case conversionFailed(NSError?)
     }
 }
 #endif

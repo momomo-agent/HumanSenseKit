@@ -5,7 +5,7 @@ import AVFoundation
 
 /// STTManager — thin orchestrator composing three layers:
 ///   Layer 0: AudioEngineManager  (audio lifecycle)
-///   Layer 1: SpeechRecognitionManager  (SpeechAnalyzer + SpeechTranscriber)
+///   Layer 1: SpeechRecognitionManager  (SFSpeechRecognizer)
 ///   Layer 2: SentenceBuilder  (sentence model + gaze tracking)
 @MainActor
 public class STTManager: NSObject, ObservableObject {
@@ -52,7 +52,7 @@ public class STTManager: NSObject, ObservableObject {
                 self.lastError = nil
                 self.wireUp()
                 self.audio.start()
-                await self.speech.startTask()
+                self.speech.startTask()
                 self.builder.resetActive()
                 self.isListening = true
             }
@@ -60,10 +60,7 @@ public class STTManager: NSObject, ObservableObject {
     }
 
     public func stop() {
-        let speech = self.speech
-        Task {
-            await speech.stop()
-        }
+        speech.stop()
         audio.stop()
         builder.finalizeAndReset()
         rebuildSegments()
@@ -78,8 +75,7 @@ public class STTManager: NSObject, ObservableObject {
     // MARK: - Wiring
 
     private func wireUp() {
-        // Layer 0 → Layer 1: audio buffers feed recognition directly
-        // appendBuffer is safe to call from audio thread (@unchecked Sendable)
+        // Layer 0 → Layer 1: audio buffers feed recognition
         audio.onBuffer = { [weak self] buffer in
             self?.speech.appendBuffer(buffer)
             Task { @MainActor in
@@ -89,19 +85,20 @@ public class STTManager: NSObject, ObservableObject {
 
         // Layer 0: engine restart → restart recognition
         audio.onRestart = { [weak self] in
-            guard let self else { return }
-            let speech = self.speech
             Task { @MainActor in
-                await speech.startTask()
+                guard let self else { return }
+                self.speech.startTask()
                 self.builder.resetActive()
             }
         }
 
-        // Layer 1 → Layer 2: transcription results (called on MainActor via callback)
+        // Layer 1 → Layer 2: transcription results
         speech.onResult = { [weak self] text, isFinal in
             guard let self else { return }
             self.builder.handleResult(text: text, isFinal: isFinal)
             if isFinal {
+                // SFSpeechRecognizer finalized — restart for next utterance
+                self.speech.startTask()
                 self.builder.resetActive()
             }
             self.rebuildSegments()
