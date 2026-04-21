@@ -139,9 +139,9 @@ public enum HandGesture: String, Equatable {
 // MARK: - Gesture Library
 
 public struct GestureLibrary {
-    public static let analyzer = FingerAnalyzer()
+    nonisolated(unsafe) public static let analyzer = FingerAnalyzer()
 
-    public static let gestures: [GestureDescription] = [
+    nonisolated(unsafe) public static let gestures: [GestureDescription] = [
         // 👍 Thumbs up: thumb straight, all others curled
         GestureDescription(.thumbsUp, constraints: [
             FingerConstraint(.thumb, curl: .noCurl),
