@@ -59,9 +59,7 @@ public class SpeechRecognitionManager {
 
         let transcriber = SpeechTranscriber(
             locale: Locale(identifier: "zh-CN"),
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: []
+            preset: .progressiveLiveTranscription
         )
         self.transcriber = transcriber
 
@@ -91,30 +89,29 @@ public class SpeechRecognitionManager {
             }
         }
 
-        // Start analyzer on background — no need to block MainActor
+        // Start analyzer — get format and start ASAP to minimize latency
         let pendingCleanup = cleanupTask
         analyzerTask = Task.detached { [weak self] in
             await pendingCleanup?.value
             let gen = await self?.generation
             guard gen == myGeneration else { return }
             do {
+                // Get optimal format and create analyzer in quick succession
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                let gen2 = await self?.generation
-                guard gen2 == myGeneration else { return }
-                await MainActor.run { self?.analyzerFormat = format }
+                guard await self?.generation == myGeneration else { return }
 
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
-                let gen3 = await self?.generation
-                guard gen3 == myGeneration else { return }
-                await MainActor.run { self?.analyzer = analyzer }
+                await MainActor.run {
+                    self?.analyzerFormat = format
+                    self?.analyzer = analyzer
+                }
 
                 // start() returns immediately — analyzer begins consuming stream
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
                 guard !Task.isCancelled else { return }
-                let gen4 = await self?.generation
-                guard gen4 == myGeneration else { return }
+                guard await self?.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
                 await MainActor.run {
                     self?.onError?(error)
@@ -174,9 +171,7 @@ public class SpeechRecognitionManager {
             // Download model if needed
             let transcriber = SpeechTranscriber(
                 locale: locale,
-                transcriptionOptions: [],
-                reportingOptions: [.volatileResults],
-                attributeOptions: []
+                preset: .progressiveLiveTranscription
             )
             if let request = try? await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 do {
