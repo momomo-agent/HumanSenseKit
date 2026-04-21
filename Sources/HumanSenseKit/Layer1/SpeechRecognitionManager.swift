@@ -43,7 +43,7 @@ public class SpeechRecognitionManager {
         }
         recognitionRequest = request
         
-        NSLog("[Speech] startTask gen=%d, onDevice=%d", gen, request.requiresOnDeviceRecognition ? 1 : 0)
+        print("[Speech] startTask gen=\(gen), onDevice=\(request.requiresOnDeviceRecognition ? 1 : 0)")
         
         recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
@@ -51,9 +51,7 @@ public class SpeechRecognitionManager {
                 guard gen == self.taskGeneration else { return }
                 
                 if let result {
-                    NSLog("[Speech] Result: '%@' isFinal=%d",
-                          result.bestTranscription.formattedString.prefix(60),
-                          result.isFinal ? 1 : 0)
+                    print("[Speech] Result: '\(result.bestTranscription.formattedString.prefix(60))' isFinal=\(result.isFinal ? 1 : 0)")
                     self.onResult?(result)
                     if result.isFinal {
                         self.startTask()
@@ -61,7 +59,7 @@ public class SpeechRecognitionManager {
                 }
                 
                 if let error, !(result?.isFinal ?? false) {
-                    NSLog("[Speech] Error: %@ (code=%d)", error.localizedDescription, (error as NSError).code)
+                    print("[Speech] Error: \(error.localizedDescription) (code=\((error as NSError).code))")
                     self.onError?(error)
                     self.taskGeneration += 1
                     self.startTask()
@@ -96,16 +94,14 @@ public class SpeechRecognitionManager {
             Task { @MainActor in
                 guard gen == self.taskGeneration else { return }
                 if let result {
-                    NSLog("[Speech] Result: '%@' isFinal=%d",
-                          result.bestTranscription.formattedString.prefix(60),
-                          result.isFinal ? 1 : 0)
+                    print("[Speech] Result: '\(result.bestTranscription.formattedString.prefix(60))' isFinal=\(result.isFinal ? 1 : 0)")
                     self.onResult?(result)
                     if result.isFinal {
                         self.startTask()
                     }
                 }
                 if let error, !(result?.isFinal ?? false) {
-                    NSLog("[Speech] Error: %@", error.localizedDescription)
+                    print("[Speech] Error: \(error.localizedDescription)")
                     self.onError?(error)
                     self.taskGeneration += 1
                     self.startTask()
@@ -128,12 +124,12 @@ public class SpeechRecognitionManager {
     /// Check authorization and call completion when ready.
     func authorize(completion: @escaping (Bool) -> Void) {
         guard let recognizer = speechRecognizer, recognizer.isAvailable else {
-            NSLog("[Speech] Recognizer not available")
+            print("[Speech] Recognizer not available")
             completion(false)
             return
         }
         SFSpeechRecognizer.requestAuthorization { status in
-            NSLog("[Speech] Auth status: %d", status.rawValue)
+            print("[Speech] Auth status: \(status.rawValue)")
             completion(status == .authorized)
         }
     }

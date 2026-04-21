@@ -48,10 +48,10 @@ public class STTManager: NSObject, ObservableObject {
     // MARK: - Lifecycle
 
     public func start() {
-        NSLog("[STT] start()")
+        print("[STT] start()")
         speech.authorize { [weak self] authorized in
             guard authorized else {
-                NSLog("[STT] Not authorized")
+                print("[STT] Not authorized")
                 return
             }
             Task { @MainActor in

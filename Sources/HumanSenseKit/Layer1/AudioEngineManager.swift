@@ -67,19 +67,19 @@ public class AudioEngineManager {
             do {
                 if session.category != .playAndRecord {
                     try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-                    NSLog("[Audio] Session configured: playAndRecord")
+                    print("[Audio] Session configured: playAndRecord")
                 }
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
                 try session.overrideOutputAudioPort(.speaker)
             } catch {
-                NSLog("[Audio] Session error: %@", error.localizedDescription)
+                print("[Audio] Session error: \(error.localizedDescription)")
             }
         }
         
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0 && format.channelCount > 0 else {
-            NSLog("[Audio] Invalid format: sr=%.0f ch=%d — retrying", format.sampleRate, format.channelCount)
+            print("[Audio] Invalid format: sr=\(format.sampleRate) ch=\(format.channelCount) — retrying")
             retryStart()
             return
         }
@@ -93,9 +93,9 @@ public class AudioEngineManager {
             audioEngine.prepare()
             do {
                 try audioEngine.start()
-                NSLog("[Audio] Engine started")
+                print("[Audio] Engine started")
             } catch {
-                NSLog("[Audio] Engine start failed: %@", error.localizedDescription)
+                print("[Audio] Engine start failed: \(error.localizedDescription)")
             }
         }
         isRunning = true
@@ -108,7 +108,7 @@ public class AudioEngineManager {
             Task { @MainActor in
                 guard let self else { return }
                 if !self.audioEngine.isRunning && self.isRunning && !self.usesExternalEngine {
-                    NSLog("[Audio] Engine died — restarting")
+                    print("[Audio] Engine died — restarting")
                     self.configureAndStart()
                     self.onRestart?()
                 }
@@ -119,13 +119,13 @@ public class AudioEngineManager {
     private func retryStart() {
         retryCount += 1
         guard retryCount <= maxRetries else {
-            NSLog("[Audio] Failed after %d retries", maxRetries)
+            print("[Audio] Failed after \(maxRetries) retries")
             return
         }
         let attempt = retryCount
         let delay = retryDelay * Double(attempt)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            NSLog("[Audio] Retry %d/%d", attempt, self?.maxRetries ?? 0)
+            print("[Audio] Retry \(attempt)/\(self?.maxRetries ?? 0)")
             self?.configureAndStart()
         }
     }
@@ -136,9 +136,9 @@ public class AudioEngineManager {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         switch type {
         case .began:
-            NSLog("[Audio] Interrupted")
+            print("[Audio] Interrupted")
         case .ended:
-            NSLog("[Audio] Interruption ended — restarting")
+            print("[Audio] Interruption ended — restarting")
             Task { @MainActor in
                 self.configureAndStart()
                 self.onRestart?()
@@ -151,8 +151,7 @@ public class AudioEngineManager {
         guard let info = notification.userInfo,
               let reason = info[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
         let session = AVAudioSession.sharedInstance()
-        NSLog("[Audio] Route changed: reason=%d, inputs=%@", reason,
-              session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ","))
+        print("[Audio] Route changed: reason=\(reason), inputs=\(session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ","))")
     }
 }
 #endif
