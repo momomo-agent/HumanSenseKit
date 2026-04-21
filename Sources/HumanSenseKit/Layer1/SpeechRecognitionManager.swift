@@ -25,26 +25,42 @@ public class SpeechRecognitionManager {
     /// Called from audio render thread — must be nonisolated.
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard analyzerReady, let continuation = inputContinuation else { return }
+        // Copy the buffer — audio tap may reuse the original
+        guard let copy = Self.copyBuffer(buffer) else { return }
         guard let format = analyzerFormat else {
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            continuation.yield(AnalyzerInput(buffer: copy))
             return
         }
-        if buffer.format == format {
-            continuation.yield(AnalyzerInput(buffer: buffer))
-        } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
-            let frameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate
-            )
-            guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
-            do {
-                try converter.convert(to: converted, from: buffer)
-                continuation.yield(AnalyzerInput(buffer: converted))
-            } catch {
-                continuation.yield(AnalyzerInput(buffer: buffer))
-            }
+        if copy.format == format {
+            continuation.yield(AnalyzerInput(buffer: copy))
+        } else if let converter = AVAudioConverter(from: copy.format, to: format),
+                  let converted = Self.convert(copy, to: format, using: converter) {
+            continuation.yield(AnalyzerInput(buffer: converted))
         } else {
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            continuation.yield(AnalyzerInput(buffer: copy))
         }
+    }
+
+    private nonisolated static func copyBuffer(_ src: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: src.format, frameCapacity: src.frameLength) else { return nil }
+        copy.frameLength = src.frameLength
+        if let srcData = src.floatChannelData, let dstData = copy.floatChannelData {
+            for ch in 0..<Int(src.format.channelCount) {
+                memcpy(dstData[ch], srcData[ch], Int(src.frameLength) * MemoryLayout<Float>.size)
+            }
+        } else if let srcData = src.int16ChannelData, let dstData = copy.int16ChannelData {
+            for ch in 0..<Int(src.format.channelCount) {
+                memcpy(dstData[ch], srcData[ch], Int(src.frameLength) * MemoryLayout<Int16>.size)
+            }
+        }
+        return copy
+    }
+
+    private nonisolated static func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat, using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+        let frameCount = AVAudioFrameCount(Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate)
+        guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return nil }
+        try? converter.convert(to: converted, from: buffer)
+        return converted
     }
     func startTask() {
         generation += 1
@@ -94,17 +110,12 @@ public class SpeechRecognitionManager {
                 guard self.generation == myGeneration else { return }
                 self.analyzer = analyzer
 
-                // DON'T open the gate yet — test if analyzer crashes without any audio
-                // self.inputContinuation = continuation
-                // self.analyzerReady = true
-
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
 
-                // Now open the gate after start() returns
+                // Open the gate after analyzer is consuming the stream
                 self.inputContinuation = continuation
                 self.analyzerReady = true
-                print("[Speech] Buffer gate opened gen=\(myGeneration)")
             } catch {
                 guard !Task.isCancelled, self.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
