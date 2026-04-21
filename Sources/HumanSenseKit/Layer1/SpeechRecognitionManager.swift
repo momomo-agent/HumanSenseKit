@@ -10,7 +10,9 @@ import AVFoundation
 @MainActor
 public class SpeechRecognitionManager {
     private var recognizer: SFSpeechRecognizer?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    /// nonisolated(unsafe) because appendBuffer is called from audio thread.
+    /// SFSpeechAudioBufferRecognitionRequest.append() is thread-safe.
+    nonisolated(unsafe) private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
 
     public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
