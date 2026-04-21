@@ -31,8 +31,14 @@ public class HumanSenseState {
     public var isLookingAtScreen: Bool { rawState.face.isLookingAtScreen }
     /// Whether the user is currently speaking.
     public var isSpeaking: Bool { rawState.audio.isSpeaking }
+    /// Whether STT has active (non-finalized) text being recognized.
+    public var hasActiveSpeech: Bool {
+        rawState.speech.segments.contains { !$0.isFinal && !$0.text.isEmpty }
+    }
     /// Whether the user is speaking while looking at the screen.
-    public var isSpeakingToDevice: Bool { isLookingAtScreen && isSpeaking }
+    /// Requires both audio detection AND active STT recognition to avoid
+    /// false positives from ambient noise.
+    public var isSpeakingToDevice: Bool { isLookingAtScreen && isSpeaking && hasActiveSpeech }
     /// Whether both eyes are closed.
     public var eyesClosed: Bool { rawState.face.eyesClosed }
     /// Distance from the user's face to the camera in meters.
