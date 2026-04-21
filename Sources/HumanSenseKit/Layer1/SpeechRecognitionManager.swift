@@ -94,12 +94,17 @@ public class SpeechRecognitionManager {
                 guard self.generation == myGeneration else { return }
                 self.analyzer = analyzer
 
-                // Open the gate — analyzer is about to start consuming
-                self.inputContinuation = continuation
-                self.analyzerReady = true
+                // DON'T open the gate yet — test if analyzer crashes without any audio
+                // self.inputContinuation = continuation
+                // self.analyzerReady = true
 
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
+
+                // Now open the gate after start() returns
+                self.inputContinuation = continuation
+                self.analyzerReady = true
+                print("[Speech] Buffer gate opened gen=\(myGeneration)")
             } catch {
                 guard !Task.isCancelled, self.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
