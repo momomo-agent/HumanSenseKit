@@ -69,44 +69,56 @@ public class SpeechRecognitionManager {
         // Open immediately — AsyncStream buffers until analyzer starts consuming
         self.inputContinuation = continuation
 
-        // Consume results — start BEFORE analyzer so we don't miss anything
-        resultTask = Task { [weak self] in
+        // Consume results on background thread — MainActor is busy with ARKit 60fps
+        resultTask = Task.detached { [weak self] in
             do {
                 for try await result in transcriber.results {
-                    guard let self, self.generation == myGeneration else { return }
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    self.onResult?(text, isFinal)
+                    await MainActor.run {
+                        guard let self, self.generation == myGeneration else { return }
+                        self.onResult?(text, isFinal)
+                    }
                 }
             } catch {
-                guard let self, !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
                 print("[Speech] Error gen=\(myGeneration): \(error.localizedDescription)")
-                self.onError?(error)
+                await MainActor.run {
+                    guard let self, self.generation == myGeneration else { return }
+                    self.onError?(error)
+                }
             }
         }
 
-        // Start analyzer — await old cleanup first
+        // Start analyzer on background — no need to block MainActor
         let pendingCleanup = cleanupTask
-        analyzerTask = Task { [weak self] in
+        analyzerTask = Task.detached { [weak self] in
             await pendingCleanup?.value
-            guard let self, self.generation == myGeneration else { return }
+            let gen = await self?.generation
+            guard gen == myGeneration else { return }
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                guard self.generation == myGeneration else { return }
-                self.analyzerFormat = format
+                let gen2 = await self?.generation
+                guard gen2 == myGeneration else { return }
+                await MainActor.run { self?.analyzerFormat = format }
 
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
-                guard self.generation == myGeneration else { return }
-                self.analyzer = analyzer
+                let gen3 = await self?.generation
+                guard gen3 == myGeneration else { return }
+                await MainActor.run { self?.analyzer = analyzer }
 
                 // start() returns immediately — analyzer begins consuming stream
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
-                guard !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
+                let gen4 = await self?.generation
+                guard gen4 == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
-                self.onError?(error)
+                await MainActor.run {
+                    self?.onError?(error)
+                }
             }
         }
     }
