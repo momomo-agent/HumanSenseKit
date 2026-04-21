@@ -101,7 +101,7 @@ public class SpeechRecognitionManager {
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
-                guard !Task.isCancelled, let self, self.generation == myGeneration else { return }
+                guard !Task.isCancelled, self.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
                 self.onError?(error)
             }
