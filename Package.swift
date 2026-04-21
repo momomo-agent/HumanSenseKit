@@ -1,11 +1,11 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 5.9
 import PackageDescription
 
 let package = Package(
     name: "HumanSenseKit",
     platforms: [
-        .iOS(.v26),
-        .macOS(.v26)
+        .iOS(.v17),
+        .macOS(.v14)  // For Combine support, but ARKit only works on iOS
     ],
     products: [
         .library(
