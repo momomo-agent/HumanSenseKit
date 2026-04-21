@@ -22,7 +22,7 @@ public class STTManager: NSObject, ObservableObject {
     }
 
     /// When true, STTManager will NOT configure AVAudioSession, enable AEC,
-    /// or start/stop the engine — the external owner handles engine lifecycle.
+    /// or start/stop the engine - the external owner handles engine lifecycle.
     public var usesExternalEngine = false
 
     /// AudioDetectionManager receives buffers from our shared tap.
@@ -115,7 +115,7 @@ public class STTManager: NSObject, ObservableObject {
         audioHealthTimer?.invalidate()
         audioHealthTimer = nil
         taskGeneration += 1
-        
+
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
 
@@ -227,15 +227,15 @@ public class STTManager: NSObject, ObservableObject {
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
         )
-        
+
         configureAndStartAudioEngine()
     }
-    
+
     @objc private func handleAudioInterruption(_ notification: Notification) {
         guard let info = notification.userInfo,
               let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        
+
         switch type {
         case .began:
             NSLog("[STT] ⚠️ Audio session INTERRUPTED!")
@@ -243,7 +243,7 @@ public class STTManager: NSObject, ObservableObject {
                 self.lastError = "Audio session interrupted"
             }
         case .ended:
-            NSLog("[STT] Audio interruption ended — restarting audio engine")
+            NSLog("[STT] Audio interruption ended - restarting audio engine")
             Task { @MainActor in
                 self.lastError = nil
                 self.configureAndStartAudioEngine()
@@ -252,7 +252,7 @@ public class STTManager: NSObject, ObservableObject {
             break
         }
     }
-    
+
     private func configureAndStartAudioEngine() {
         if !usesExternalEngine {
             // Stop existing engine and clean up
@@ -262,7 +262,7 @@ public class STTManager: NSObject, ObservableObject {
         }
         // Always remove tap before reinstalling
         audioEngine.inputNode.removeTap(onBus: 0)
-        
+
         if !usesExternalEngine {
             let audioSession = AVAudioSession.sharedInstance()
             do {
@@ -284,7 +284,7 @@ public class STTManager: NSObject, ObservableObject {
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
-            NSLog("[STT] Invalid recording format: sampleRate=%.0f channels=%d — will retry", recordingFormat.sampleRate, recordingFormat.channelCount)
+            NSLog("[STT] Invalid recording format: sampleRate=%.0f channels=%d - will retry", recordingFormat.sampleRate, recordingFormat.channelCount)
             retryAudioEngineStart()
             return
         }
@@ -312,12 +312,12 @@ public class STTManager: NSObject, ObservableObject {
             }
         }
         isListening = true
-        
+
         // Monitor audio route changes
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange(_:)), name: AVAudioSession.routeChangeNotification, object: nil)
-        
-        // Periodic health check — detect if audio engine silently died
+
+        // Periodic health check - detect if audio engine silently died
         audioHealthTimer?.invalidate()
         audioHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -331,7 +331,7 @@ public class STTManager: NSObject, ObservableObject {
                     self.lastError = "Audio engine stopped unexpectedly, restarting"
                     self.configureAndStartAudioEngine()
                 } else if !running && self.isListening && self.usesExternalEngine {
-                    NSLog("[STT] ⚠️ External audio engine stopped — waiting for owner to restart")
+                    NSLog("[STT] ⚠️ External audio engine stopped - waiting for owner to restart")
                     self.lastError = "External audio engine stopped"
                 }
             }
@@ -344,7 +344,7 @@ public class STTManager: NSObject, ObservableObject {
     private func retryAudioEngineStart() {
         audioEngineRetryCount += 1
         guard audioEngineRetryCount <= maxAudioEngineRetries else {
-            NSLog("[STT] ❌ Audio engine failed after %d retries — giving up", maxAudioEngineRetries)
+            NSLog("[STT] ❌ Audio engine failed after %d retries - giving up", maxAudioEngineRetries)
             return
         }
         let attempt = audioEngineRetryCount
@@ -356,7 +356,7 @@ public class STTManager: NSObject, ObservableObject {
             self.configureAndStartAudioEngine()
         }
     }
-    
+
     @objc private func handleRouteChange(_ notification: Notification) {
         guard let info = notification.userInfo,
               let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
@@ -419,13 +419,13 @@ public class STTManager: NSObject, ObservableObject {
 
         let request = makeRequest()
         recognitionRequest = request
-        
+
         NSLog("[STT] startRecognitionTask gen=%d, recognizer=%@, onDevice=%d", gen,
               speechRecognizer != nil ? "exists" : "nil",
               request.requiresOnDeviceRecognition ? 1 : 0)
-        
+
         bindTask(to: request, generation: gen)
-        
+
         NSLog("[STT] recognitionTask=%@", recognitionTask != nil ? "created" : "nil")
     }
 
@@ -499,16 +499,25 @@ public class STTManager: NSObject, ObservableObject {
         rebuildSegments()
     }
 
-    // MARK: - Silence Detection (disabled — trusting Apple’s isFinal endpointing)
+    // MARK: - Silence Detection
 
     private func startSilenceTimer() {
-        // No-op: Apple’s SFSpeechRecognitionResult.isFinal handles end-of-speech
-        // detection using its built-in language-model-based endpointing.
-        // Our manual 1s silence split was too aggressive and cut users off mid-thought.
+        silenceTimer?.invalidate()
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkSilence()
+            }
+        }
     }
 
     private func checkSilence() {
-        // No-op: see startSilenceTimer()
+        guard let lastTime = lastRecognitionTime else { return }
+        let elapsed = Date().timeIntervalSince(lastTime)
+        // Split sentence after 2s of silence — long enough to not cut mid-thought,
+        // short enough to prevent Apple from revising earlier text when user resumes.
+        if elapsed >= 2.0 {
+            splitSentence()
+        }
     }
 
     // MARK: - Gaze Helpers
