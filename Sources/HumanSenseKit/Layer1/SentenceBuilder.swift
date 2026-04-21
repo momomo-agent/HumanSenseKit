@@ -55,6 +55,8 @@ public class SentenceBuilder {
         let newCharCount = text.count
         let addedChars = max(0, newCharCount - lastCharCount)
         
+        print("[SentenceBuilder] handleResult: '\(text.prefix(40))' isFinal=\(isFinal) chars=\(newCharCount) added=\(addedChars)")
+        
         activeSentence?.text = text
         lastRecognitionTime = Date()
         
@@ -130,7 +132,9 @@ public class SentenceBuilder {
     
     private func checkSilence() {
         guard let lastTime = lastRecognitionTime else { return }
-        if Date().timeIntervalSince(lastTime) >= silenceThreshold {
+        let elapsed = Date().timeIntervalSince(lastTime)
+        if elapsed >= silenceThreshold {
+            print("[SentenceBuilder] Silence split triggered (elapsed=\(String(format: "%.1f", elapsed))s)")
             finalizeActiveSentence()
             onSilenceSplit?()
         }

@@ -128,6 +128,7 @@ public class STTManager: NSObject, ObservableObject {
     }
 
     private func performSplit() {
+        print("[STT] performSplit — finalizing and splitting task")
         builder.finalizeAndReset()
         speech.splitTask()
         builder.resetActive()
