@@ -59,9 +59,7 @@ public class SpeechRecognitionManager {
 
         let transcriber = SpeechTranscriber(
             locale: Locale(identifier: "zh-CN"),
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: []
+            preset: .progressiveTranscription
         )
         self.transcriber = transcriber
 
