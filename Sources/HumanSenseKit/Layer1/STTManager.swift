@@ -86,9 +86,10 @@ public class STTManager: NSObject, ObservableObject {
 
     private func wireUp() {
         // Layer 0 → Layer 1: audio buffers feed recognition
+        // onBuffer is called from audio thread, so dispatch to MainActor
         audio.onBuffer = { [weak self] buffer in
-            self?.speech.appendBuffer(buffer)
             Task { @MainActor in
+                self?.speech.appendBuffer(buffer)
                 self?.audioDetectionManager?.processBuffer(buffer)
             }
         }

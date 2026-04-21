@@ -8,12 +8,9 @@ import AVFoundation
 /// Based on Apple's official sample code "Bringing advanced speech-to-text
 /// capabilities to your app" (WWDC25 session 277).
 ///
-/// Key design decisions from Apple's sample:
-/// - Uses SpeechTranscriber (not DictationTranscriber) for live audio
-/// - NOT @MainActor — uses @Observable pattern instead
-/// - Result consumption task starts BEFORE analyzer.start()
-/// - Buffer conversion uses a reusable BufferConverter
-/// - finishTranscribing() calls finalizeAndFinishThroughEndOfInput()
+/// @MainActor to match STTManager's isolation domain and avoid data races.
+/// Audio buffers are dispatched to MainActor from the audio thread.
+@MainActor
 public class SpeechRecognitionManager {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
@@ -35,14 +32,12 @@ public class SpeechRecognitionManager {
             let converted = try bufferConverter.convertBuffer(buffer, to: analyzerFormat)
             inputContinuation.yield(AnalyzerInput(buffer: converted))
         } catch {
-            // Fallback: try raw buffer
             inputContinuation.yield(AnalyzerInput(buffer: buffer))
         }
     }
 
     /// Start the analyzer. Safe to call multiple times — previous session is torn down first.
     func startTask() async {
-        // Tear down any existing session
         await stop()
 
         print("[Speech] startTask")
@@ -55,46 +50,40 @@ public class SpeechRecognitionManager {
         )
         self.transcriber = transcriber
 
-        // Create analyzer with modules (Apple pattern: init with modules, start with inputSequence)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
 
-        // Get best audio format
         self.analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
 
-        // Create input stream
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputContinuation = continuation
 
         // Start result consumption BEFORE analyzer.start() (Apple pattern)
-        let onResult = self.onResult
-        let onError = self.onError
-        resultTask = Task {
+        resultTask = Task { [weak self] in
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    await MainActor.run {
-                        onResult?(text, isFinal)
+                    await MainActor.run { [weak self] in
+                        self?.onResult?(text, isFinal)
                     }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 print("[Speech] Error: \(error.localizedDescription)")
-                await MainActor.run {
-                    onError?(error)
+                await MainActor.run { [weak self] in
+                    self?.onError?(error)
                 }
             }
         }
 
-        // Start analyzer with input sequence
         do {
             try await analyzer.start(inputSequence: stream)
             print("[Speech] Analyzer started")
         } catch {
             print("[Speech] Analyzer start failed: \(error.localizedDescription)")
-            onError?(error)
+            self.onError?(error)
         }
     }
 
@@ -154,7 +143,6 @@ public class SpeechRecognitionManager {
 
 // MARK: - Buffer Converter (from Apple sample code)
 
-/// Reusable audio buffer converter that handles format mismatches.
 private class BufferConverter {
     private var converter: AVAudioConverter?
 
