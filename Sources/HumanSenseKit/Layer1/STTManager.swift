@@ -5,10 +5,11 @@ import AVFoundation
 
 /// STTManager — thin orchestrator composing three layers:
 ///   Layer 0: AudioEngineManager  (audio lifecycle)
-///   Layer 1: SpeechRecognitionManager  (recognition tasks)
-///   Layer 2: SentenceBuilder  (sentence model + confirmation)
+///   Layer 1: SpeechRecognitionManager  (SpeechAnalyzer + DictationTranscriber)
+///   Layer 2: SentenceBuilder  (sentence model + gaze tracking)
 ///
-/// Public API is unchanged — segments, isListening, start/stop, etc.
+/// With iOS 26 SpeechAnalyzer, we no longer need manual silence splitting.
+/// Apple handles volatile→final transitions automatically.
 @MainActor
 public class STTManager: NSObject, ObservableObject {
     @Published public var segments: [SpeechSegment] = []
@@ -60,14 +61,12 @@ public class STTManager: NSObject, ObservableObject {
                 self?.audio.start()
                 self?.speech.startTask()
                 self?.builder.resetActive()
-                self?.builder.startSilenceTimer()
                 self?.isListening = true
             }
         }
     }
 
     public func stop() {
-        builder.stopSilenceTimer()
         speech.stop()
         audio.stop()
         builder.finalizeAndReset()
@@ -99,12 +98,12 @@ public class STTManager: NSObject, ObservableObject {
             }
         }
 
-        // Layer 1 → Layer 2: recognition results feed sentence builder
-        speech.onResult = { [weak self] result in
+        // Layer 1 → Layer 2: transcription results feed sentence builder
+        speech.onResult = { [weak self] text, isFinal in
             guard let self else { return }
-            let text = result.bestTranscription.formattedString
-            self.builder.handleResult(text: text, isFinal: result.isFinal)
-            if result.isFinal {
+            self.builder.handleResult(text: text, isFinal: isFinal)
+            if isFinal {
+                // Apple finalized this segment — reset for next sentence
                 self.builder.resetActive()
             }
             self.rebuildSegments()
@@ -115,24 +114,6 @@ public class STTManager: NSObject, ObservableObject {
             self?.builder.finalizeAndReset()
             self?.rebuildSegments()
         }
-
-        // Layer 1: task duration limit → split
-        speech.onTaskSplit = { [weak self] in
-            self?.performSplit()
-        }
-
-        // Layer 2 → Layer 1: silence split → new recognition task
-        builder.onSilenceSplit = { [weak self] in
-            self?.performSplit()
-        }
-    }
-
-    private func performSplit() {
-        print("[STT] performSplit — finalizing and splitting task")
-        builder.finalizeAndReset()
-        speech.splitTask()
-        builder.resetActive()
-        rebuildSegments()
     }
 
     private func rebuildSegments() {

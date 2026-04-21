@@ -1,145 +1,175 @@
 #if os(iOS)
 import Foundation
 import Speech
+import AVFoundation
 
-/// Layer 1: Speech recognition task management.
-/// Handles SFSpeechRecognizer lifecycle, request creation, task binding,
-/// and the 50s task duration limit. Outputs raw recognition results.
+/// Layer 1: Speech recognition using iOS 26 SpeechAnalyzer.
+///
+/// Uses DictationTranscriber with progressiveLongDictation preset for
+/// real-time volatile + final results. No more manual task splitting —
+/// Apple handles the volatile→final lifecycle.
 @MainActor
 public class SpeechRecognitionManager {
-    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var taskGeneration: Int = 0
-    private var taskDurationTimer: Timer?
-    private let maxTaskDuration: TimeInterval = 50.0
-    
-    /// Called with each recognition result (partial or final).
-    public var onResult: ((SFSpeechRecognitionResult) -> Void)?
-    
-    /// Called when a recognition error occurs.
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: DictationTranscriber?
+    private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+    private var resultTask: Task<Void, Never>?
+    private var analyzerFormat: AVAudioFormat?
+
+    /// Called with transcription text. `isFinal` means Apple has finalized this segment.
+    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+
+    /// Called when an error occurs.
     public var onError: ((Error) -> Void)?
-    
-    /// Called when the task needs to split (duration limit reached).
-    public var onTaskSplit: (() -> Void)?
-    
-    /// Append audio buffer to the current recognition request.
+
+    /// Append audio buffer to the analyzer.
     func appendBuffer(_ buffer: AVAudioPCMBuffer) {
-        recognitionRequest?.append(buffer)
-    }
-    
-    /// Start a new recognition task. Cancels any existing one.
-    func startTask() {
-        taskGeneration += 1
-        let gen = taskGeneration
-        
-        resetTaskDurationTimer()
-        
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.contextualStrings = ["看屏幕", "看别处", "说话", "识别"]
-        if #available(iOS 13, *) {
-            request.requiresOnDeviceRecognition = speechRecognizer?.supportsOnDeviceRecognition ?? false
-        }
-        recognitionRequest = request
-        
-        print("[Speech] startTask gen=\(gen), onDevice=\(request.requiresOnDeviceRecognition ? 1 : 0)")
-        
-        recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            Task { @MainActor in
-                guard gen == self.taskGeneration else { return }
-                
-                if let result {
-                    print("[Speech] Result: '\(result.bestTranscription.formattedString.prefix(60))' isFinal=\(result.isFinal ? 1 : 0)")
-                    self.onResult?(result)
-                    if result.isFinal {
-                        self.startTask()
-                    }
-                }
-                
-                if let error, !(result?.isFinal ?? false) {
-                    print("[Speech] Error: \(error.localizedDescription) (code=\((error as NSError).code))")
-                    self.onError?(error)
-                    self.taskGeneration += 1
-                    self.startTask()
-                }
-            }
-        }
-    }
-    
-    /// End the current task and start a fresh one (for sentence splitting).
-    func splitTask() {
-        let oldRequest = recognitionRequest
-        let oldTask = recognitionTask
-        
-        taskGeneration += 1
-        
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.contextualStrings = ["看屏幕", "看别处", "说话", "识别"]
-        if #available(iOS 13, *) {
-            request.requiresOnDeviceRecognition = speechRecognizer?.supportsOnDeviceRecognition ?? false
-        }
-        recognitionRequest = request
-        
-        oldRequest?.endAudio()
-        oldTask?.cancel()
-        
-        resetTaskDurationTimer()
-        
-        let gen = taskGeneration
-        recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            Task { @MainActor in
-                guard gen == self.taskGeneration else { return }
-                if let result {
-                    print("[Speech] Result: '\(result.bestTranscription.formattedString.prefix(60))' isFinal=\(result.isFinal ? 1 : 0)")
-                    self.onResult?(result)
-                    if result.isFinal {
-                        self.startTask()
-                    }
-                }
-                if let error, !(result?.isFinal ?? false) {
-                    print("[Speech] Error: \(error.localizedDescription)")
-                    self.onError?(error)
-                    self.taskGeneration += 1
-                    self.startTask()
-                }
-            }
-        }
-    }
-    
-    /// Stop recognition entirely.
-    func stop() {
-        taskGeneration += 1
-        taskDurationTimer?.invalidate()
-        taskDurationTimer = nil
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-    }
-    
-    /// Check authorization and call completion when ready.
-    func authorize(completion: @escaping (Bool) -> Void) {
-        guard let recognizer = speechRecognizer, recognizer.isAvailable else {
-            print("[Speech] Recognizer not available")
-            completion(false)
+        guard let format = analyzerFormat else {
+            // If no format conversion needed, pass directly
+            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
             return
         }
-        SFSpeechRecognizer.requestAuthorization { status in
-            print("[Speech] Auth status: \(status.rawValue)")
-            completion(status == .authorized)
+        // Convert if needed
+        if buffer.format == format {
+            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+        } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
+            let frameCount = AVAudioFrameCount(
+                Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate
+            )
+            guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+            do {
+                try converter.convert(to: converted, from: buffer)
+                inputContinuation?.yield(AnalyzerInput(buffer: converted))
+            } catch {
+                // Fallback: pass original
+                inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+            }
+        } else {
+            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
         }
     }
-    
-    private func resetTaskDurationTimer() {
-        taskDurationTimer?.invalidate()
-        taskDurationTimer = Timer.scheduledTimer(withTimeInterval: maxTaskDuration, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.onTaskSplit?()
+
+    /// Start the analyzer with a DictationTranscriber.
+    func startTask() {
+        stopTask()
+
+        let transcriber = DictationTranscriber(
+            locale: Locale(identifier: "zh-CN"),
+            preset: .progressiveLongDictation
+        )
+        self.transcriber = transcriber
+
+        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        self.inputContinuation = continuation
+
+        // Start result consumption
+        resultTask = Task { [weak self] in
+            do {
+                for try await result in transcriber.results {
+                    guard let self else { return }
+                    let text = String(result.text.characters)
+                    let isFinal = result.isFinal
+                    print("[Speech] Result: '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
+                    await MainActor.run {
+                        self.onResult?(text, isFinal)
+                    }
+                }
+            } catch {
+                guard let self else { return }
+                print("[Speech] Error: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.onError?(error)
+                }
             }
+        }
+
+        // Start analyzer
+        Task {
+            do {
+                let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+                self.analyzerFormat = format
+
+                let analyzer = SpeechAnalyzer(
+                    inputSequence: stream,
+                    modules: [transcriber]
+                )
+                self.analyzer = analyzer
+                try await analyzer.start(inputSequence: stream)
+                print("[Speech] Analyzer started")
+            } catch {
+                print("[Speech] Analyzer start failed: \(error.localizedDescription)")
+                self.onError?(error)
+            }
+        }
+    }
+
+    /// Stop the analyzer.
+    func stopTask() {
+        resultTask?.cancel()
+        resultTask = nil
+        inputContinuation?.finish()
+        inputContinuation = nil
+
+        Task {
+            try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        }
+        analyzer = nil
+        transcriber = nil
+        analyzerFormat = nil
+    }
+
+    /// Finalize current input and restart (for sentence boundary).
+    func splitTask() {
+        // With SpeechAnalyzer, we don't need manual splitting.
+        // Apple handles volatile→final transitions automatically.
+        // But if we want to force a boundary, finalize and restart.
+        print("[Speech] splitTask — finalizing and restarting")
+        let oldContinuation = inputContinuation
+        let oldAnalyzer = analyzer
+
+        Task {
+            oldContinuation?.finish()
+            try? await oldAnalyzer?.finalizeAndFinishThroughEndOfInput()
+        }
+
+        // Restart fresh
+        startTask()
+    }
+
+    func stop() {
+        stopTask()
+    }
+
+    /// Check model availability and download if needed.
+    func authorize(completion: @escaping @Sendable (Bool) -> Void) {
+        Task {
+            let locale = Locale(identifier: "zh-CN")
+            let supported = await DictationTranscriber.supportedLocales
+            guard supported.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) else {
+                print("[Speech] zh-CN not supported")
+                completion(false)
+                return
+            }
+
+            // Check if model is installed
+            let installed = await DictationTranscriber.installedLocales
+            if !installed.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) {
+                print("[Speech] zh-CN model not installed, attempting download...")
+                let transcriber = DictationTranscriber(locale: locale, preset: .progressiveLongDictation)
+                if let downloader = try? await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                    do {
+                        try await downloader.downloadAndInstall()
+                        print("[Speech] Model downloaded")
+                    } catch {
+                        print("[Speech] Model download failed: \(error.localizedDescription)")
+                        completion(false)
+                        return
+                    }
+                }
+            }
+
+            print("[Speech] Authorized and ready")
+            completion(true)
         }
     }
 }
