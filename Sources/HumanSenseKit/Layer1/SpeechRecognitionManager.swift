@@ -4,9 +4,6 @@ import Speech
 import AVFoundation
 
 /// Layer 1: Speech recognition using iOS 26 SpeechAnalyzer.
-///
-/// Uses DictationTranscriber with progressiveLongDictation preset for
-/// real-time volatile + final results.
 @MainActor
 public class SpeechRecognitionManager {
     private var analyzer: SpeechAnalyzer?
@@ -16,17 +13,18 @@ public class SpeechRecognitionManager {
     private var cleanupTask: Task<Void, Never>?
     private var generation: Int = 0
 
-    // nonisolated(unsafe) — accessed from audio thread via appendBuffer
+    // nonisolated(unsafe) — written on MainActor, read from audio thread
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
+    // Gate: only yield buffers after analyzer is running
+    nonisolated(unsafe) private var analyzerReady: Bool = false
 
     public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
     public var onError: ((Error) -> Void)?
 
-    /// Append audio buffer to the analyzer.
-    /// Called from the audio render thread — must be nonisolated.
+    /// Called from audio render thread — must be nonisolated.
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let continuation = inputContinuation else { return }
+        guard analyzerReady, let continuation = inputContinuation else { return }
         guard let format = analyzerFormat else {
             continuation.yield(AnalyzerInput(buffer: buffer))
             return
@@ -48,7 +46,6 @@ public class SpeechRecognitionManager {
             continuation.yield(AnalyzerInput(buffer: buffer))
         }
     }
-    /// Start the analyzer with a DictationTranscriber.
     func startTask() {
         generation += 1
         let myGeneration = generation
@@ -63,64 +60,56 @@ public class SpeechRecognitionManager {
         self.transcriber = transcriber
 
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        self.inputContinuation = continuation
+        // Don't set inputContinuation yet — wait until analyzer is ready
+        // This prevents buffering audio before the analyzer can consume it
 
-        // Consume results — detached so Speech framework runs on its own queue
-        resultTask = Task.detached { [weak self] in
+        // Consume results
+        resultTask = Task { [weak self] in
             do {
                 for try await result in transcriber.results {
-                    let gen = await self?.generation
-                    guard gen == myGeneration else { return }
+                    guard let self, self.generation == myGeneration else { return }
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    await MainActor.run {
-                        self?.onResult?(text, isFinal)
-                    }
+                    self.onResult?(text, isFinal)
                 }
             } catch {
-                guard !Task.isCancelled else { return }
-                let gen = await self?.generation
-                guard gen == myGeneration else { return }
+                guard let self, !Task.isCancelled, self.generation == myGeneration else { return }
                 print("[Speech] Error gen=\(myGeneration): \(error.localizedDescription)")
-                await MainActor.run {
-                    self?.onError?(error)
-                }
+                self.onError?(error)
             }
         }
 
-        // Start analyzer — detached, awaits old cleanup first
+        // Start analyzer — await old cleanup, then open the buffer gate
         let pendingCleanup = cleanupTask
-        analyzerTask = Task.detached { [weak self] in
+        analyzerTask = Task { [weak self] in
             await pendingCleanup?.value
-            let gen = await self?.generation
-            guard gen == myGeneration else { return }
+            guard let self, self.generation == myGeneration else { return }
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                let gen2 = await self?.generation
-                guard gen2 == myGeneration else { return }
-                await MainActor.run { self?.analyzerFormat = format }
+                guard self.generation == myGeneration else { return }
+                self.analyzerFormat = format
 
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
-                let gen3 = await self?.generation
-                guard gen3 == myGeneration else { return }
-                await MainActor.run { self?.analyzer = analyzer }
+                guard self.generation == myGeneration else { return }
+                self.analyzer = analyzer
+
+                // Open the gate — analyzer is about to start consuming
+                self.inputContinuation = continuation
+                self.analyzerReady = true
 
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
-                guard !Task.isCancelled else { return }
-                let gen4 = await self?.generation
-                guard gen4 == myGeneration else { return }
+                guard !Task.isCancelled, let self, self.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
-                await MainActor.run {
-                    self?.onError?(error)
-                }
+                self.onError?(error)
             }
         }
     }
 
     private func tearDown() {
+        analyzerReady = false
         let oldAnalyzer = analyzer
         let oldContinuation = inputContinuation
 
@@ -136,7 +125,7 @@ public class SpeechRecognitionManager {
         oldContinuation?.finish()
 
         let previousCleanup = cleanupTask
-        cleanupTask = Task.detached {
+        cleanupTask = Task {
             await previousCleanup?.value
             if let oldAnalyzer {
                 try? await oldAnalyzer.finalizeAndFinishThroughEndOfInput()
@@ -158,7 +147,6 @@ public class SpeechRecognitionManager {
                 completion(false)
                 return
             }
-
             let installed = await DictationTranscriber.installedLocales
             if !installed.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) {
                 print("[Speech] zh-CN model not installed, attempting download...")
@@ -174,7 +162,6 @@ public class SpeechRecognitionManager {
                     }
                 }
             }
-
             print("[Speech] Authorized and ready")
             completion(true)
         }
