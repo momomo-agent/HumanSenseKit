@@ -27,7 +27,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let continuation = inputContinuation else { return }
         guard let format = analyzerFormat else {
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            // Format not yet known — drop buffer to avoid sending Float32 to analyzer
             return
         }
         if buffer.format == format {
@@ -47,7 +47,8 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                 continuation.yield(AnalyzerInput(buffer: converted))
             }
         } else {
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            // Cannot convert — drop buffer rather than crash analyzer
+            return
         }
     }
     func startTask() {
