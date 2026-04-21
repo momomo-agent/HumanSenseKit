@@ -5,7 +5,7 @@ import AVFoundation
 
 /// STTManager — thin orchestrator composing three layers:
 ///   Layer 0: AudioEngineManager  (audio lifecycle)
-///   Layer 1: SpeechRecognitionManager  (SpeechAnalyzer + DictationTranscriber)
+///   Layer 1: SpeechRecognitionManager  (SpeechAnalyzer + SpeechTranscriber)
 ///   Layer 2: SentenceBuilder  (sentence model + gaze tracking)
 ///
 /// With iOS 26 SpeechAnalyzer, we no longer need manual silence splitting.
@@ -56,18 +56,21 @@ public class STTManager: NSObject, ObservableObject {
                 return
             }
             Task { @MainActor in
-                self?.lastError = nil
-                self?.wireUp()
-                self?.audio.start()
-                self?.speech.startTask()
-                self?.builder.resetActive()
-                self?.isListening = true
+                guard let self else { return }
+                self.lastError = nil
+                self.wireUp()
+                self.audio.start()
+                await self.speech.startTask()
+                self.builder.resetActive()
+                self.isListening = true
             }
         }
     }
 
     public func stop() {
-        speech.stop()
+        Task {
+            await speech.stop()
+        }
         audio.stop()
         builder.finalizeAndReset()
         rebuildSegments()
@@ -93,8 +96,9 @@ public class STTManager: NSObject, ObservableObject {
         // Layer 0: engine restart → restart recognition
         audio.onRestart = { [weak self] in
             Task { @MainActor in
-                self?.speech.startTask()
-                self?.builder.resetActive()
+                guard let self else { return }
+                await self.speech.startTask()
+                self.builder.resetActive()
             }
         }
 
@@ -103,7 +107,6 @@ public class STTManager: NSObject, ObservableObject {
             guard let self else { return }
             self.builder.handleResult(text: text, isFinal: isFinal)
             if isFinal {
-                // Apple finalized this segment — reset for next sentence
                 self.builder.resetActive()
             }
             self.rebuildSegments()
