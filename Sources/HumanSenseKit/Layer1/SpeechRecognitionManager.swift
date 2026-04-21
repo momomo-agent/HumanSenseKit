@@ -6,30 +6,21 @@ import AVFoundation
 /// Layer 1: Speech recognition using iOS 26 SpeechAnalyzer.
 ///
 /// Modeled after Apple's official sample code (WWDC25 session 277).
-/// NOT @MainActor — SpeechAnalyzer is an actor with its own executor,
-/// and forcing MainActor causes dispatch_assert_queue failures.
-///
-/// Thread safety for appendBuffer (called from audio thread) is handled
-/// via the thread-safe AsyncStream.Continuation.yield().
+/// All SpeechAnalyzer interactions happen in a detached task to avoid
+/// any actor context interference with SpeechAnalyzer's internal executor.
 public final class SpeechRecognitionManager: @unchecked Sendable {
-    // These are only mutated from startTask/stop which are always called
-    // from MainActor (STTManager). appendBuffer only reads analyzerFormat
-    // and inputContinuation, which are set before audio starts flowing.
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var resultTask: Task<Void, Error>?
+    private var analyzerTask: Task<Void, Never>?
     private var analyzerFormat: AVAudioFormat?
     private var bufferConverter = BufferConverter()
 
-    /// Called with transcription text on MainActor.
     public var onResult: (@MainActor (_ text: String, _ isFinal: Bool) -> Void)?
-
-    /// Called when an error occurs on MainActor.
     public var onError: (@MainActor (Error) -> Void)?
 
-    /// Append audio buffer to the analyzer.
-    /// Called from audio engine thread — only touches thread-safe continuation.
+    /// Append audio buffer. Called from audio engine thread.
     func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let analyzerFormat, let inputContinuation else { return }
         do {
@@ -41,7 +32,6 @@ public final class SpeechRecognitionManager: @unchecked Sendable {
     }
 
     /// Start the analyzer. Safe to call multiple times.
-    /// Must be called from MainActor context (via STTManager).
     func startTask() async {
         await stop()
 
@@ -63,12 +53,12 @@ public final class SpeechRecognitionManager: @unchecked Sendable {
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputContinuation = continuation
 
-        // Capture callbacks before Task to avoid capturing self
         let onResult = self.onResult
         let onError = self.onError
 
-        // Start result consumption BEFORE analyzer.start() (Apple pattern)
-        resultTask = Task.detached {
+        // Apple pattern: start result consumption BEFORE analyzer.start()
+        // Use plain Task (not detached) — matches Apple sample exactly
+        resultTask = Task {
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
@@ -87,35 +77,44 @@ public final class SpeechRecognitionManager: @unchecked Sendable {
             }
         }
 
-        // Start analyzer — this runs on SpeechAnalyzer's own executor
-        do {
-            try await analyzer.start(inputSequence: stream)
-            print("[Speech] Analyzer started")
-        } catch {
-            print("[Speech] Analyzer start failed: \(error.localizedDescription)")
-            if let onError {
-                await onError(error)
+        // Run analyzer.start() in a detached context — no actor inheritance.
+        // This is critical: SpeechAnalyzer is an actor and its start() must
+        // not be called from within another actor's context.
+        analyzerTask = Task.detached { [weak self] in
+            do {
+                try await analyzer.start(inputSequence: stream)
+                print("[Speech] Analyzer started")
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("[Speech] Analyzer start failed: \(error.localizedDescription)")
+                if let onError {
+                    await onError(error)
+                }
             }
         }
     }
 
-    /// Stop and tear down.
     func stop() async {
         inputContinuation?.finish()
         inputContinuation = nil
 
+        // Also detach the finalize call to avoid actor context issues
         if let analyzer {
-            try? await analyzer.finalizeAndFinishThroughEndOfInput()
+            let a = analyzer
+            await Task.detached {
+                try? await a.finalizeAndFinishThroughEndOfInput()
+            }.value
         }
 
         resultTask?.cancel()
         resultTask = nil
+        analyzerTask?.cancel()
+        analyzerTask = nil
         analyzer = nil
         transcriber = nil
         analyzerFormat = nil
     }
 
-    /// Check model availability and download if needed.
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
         Task.detached {
             let locale = Locale(identifier: "zh-CN")
