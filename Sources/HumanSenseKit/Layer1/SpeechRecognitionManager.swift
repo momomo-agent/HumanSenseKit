@@ -145,15 +145,22 @@ public class SpeechRecognitionManager {
         Task {
             let locale = Locale(identifier: "zh-CN")
 
-            // Check if SpeechTranscriber supports this locale
-            let available = await SpeechTranscriber.isAvailable(locale: locale)
-            guard available else {
-                print("[Speech] SpeechTranscriber not available for zh-CN")
+            // Check if SpeechTranscriber is available on this device
+            guard await SpeechTranscriber.isAvailable else {
+                print("[Speech] SpeechTranscriber not available on this device")
                 completion(false)
                 return
             }
 
-            // Check if model is installed, download if needed
+            // Check supported locales
+            let supported = await SpeechTranscriber.supportedLocales
+            guard supported.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) else {
+                print("[Speech] zh-CN not supported by SpeechTranscriber")
+                completion(false)
+                return
+            }
+
+            // Download model if needed
             let transcriber = SpeechTranscriber(
                 locale: locale,
                 transcriptionOptions: [],
