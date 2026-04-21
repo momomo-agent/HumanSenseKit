@@ -499,22 +499,16 @@ public class STTManager: NSObject, ObservableObject {
         rebuildSegments()
     }
 
-    // MARK: - Silence Detection
+    // MARK: - Silence Detection (disabled — trusting Apple’s isFinal endpointing)
 
     private func startSilenceTimer() {
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkSilence()
-            }
-        }
+        // No-op: Apple’s SFSpeechRecognitionResult.isFinal handles end-of-speech
+        // detection using its built-in language-model-based endpointing.
+        // Our manual 1s silence split was too aggressive and cut users off mid-thought.
     }
 
     private func checkSilence() {
-        guard let lastTime = lastRecognitionTime else { return }
-        guard Date().timeIntervalSince(lastTime) >= sentenceGapThreshold else { return }
-        guard activeSentence != nil, !(activeSentence?.text.isEmpty ?? true) else { return }
-        splitSentence()
+        // No-op: see startSilenceTimer()
     }
 
     // MARK: - Gaze Helpers
