@@ -5,13 +5,16 @@ import AVFoundation
 
 /// Layer 1: Speech recognition using iOS 26 SpeechAnalyzer.
 ///
-/// Based on Apple's official sample code "Bringing advanced speech-to-text
-/// capabilities to your app" (WWDC25 session 277).
+/// Modeled after Apple's official sample code (WWDC25 session 277).
+/// NOT @MainActor — SpeechAnalyzer is an actor with its own executor,
+/// and forcing MainActor causes dispatch_assert_queue failures.
 ///
-/// @MainActor to match STTManager's isolation domain and avoid data races.
-/// Audio buffers are dispatched to MainActor from the audio thread.
-@MainActor
-public class SpeechRecognitionManager {
+/// Thread safety for appendBuffer (called from audio thread) is handled
+/// via the thread-safe AsyncStream.Continuation.yield().
+public final class SpeechRecognitionManager: @unchecked Sendable {
+    // These are only mutated from startTask/stop which are always called
+    // from MainActor (STTManager). appendBuffer only reads analyzerFormat
+    // and inputContinuation, which are set before audio starts flowing.
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
@@ -19,13 +22,14 @@ public class SpeechRecognitionManager {
     private var analyzerFormat: AVAudioFormat?
     private var bufferConverter = BufferConverter()
 
-    /// Called with transcription text. `isFinal` means Apple has finalized this segment.
-    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+    /// Called with transcription text on MainActor.
+    public var onResult: (@MainActor (_ text: String, _ isFinal: Bool) -> Void)?
 
-    /// Called when an error occurs.
-    public var onError: ((Error) -> Void)?
+    /// Called when an error occurs on MainActor.
+    public var onError: (@MainActor (Error) -> Void)?
 
     /// Append audio buffer to the analyzer.
+    /// Called from audio engine thread — only touches thread-safe continuation.
     func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let analyzerFormat, let inputContinuation else { return }
         do {
@@ -36,7 +40,8 @@ public class SpeechRecognitionManager {
         }
     }
 
-    /// Start the analyzer. Safe to call multiple times — previous session is torn down first.
+    /// Start the analyzer. Safe to call multiple times.
+    /// Must be called from MainActor context (via STTManager).
     func startTask() async {
         await stop()
 
@@ -58,32 +63,39 @@ public class SpeechRecognitionManager {
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputContinuation = continuation
 
+        // Capture callbacks before Task to avoid capturing self
+        let onResult = self.onResult
+        let onError = self.onError
+
         // Start result consumption BEFORE analyzer.start() (Apple pattern)
-        resultTask = Task { [weak self] in
+        resultTask = Task.detached {
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    await MainActor.run { [weak self] in
-                        self?.onResult?(text, isFinal)
+                    if let onResult {
+                        await onResult(text, isFinal)
                     }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 print("[Speech] Error: \(error.localizedDescription)")
-                await MainActor.run { [weak self] in
-                    self?.onError?(error)
+                if let onError {
+                    await onError(error)
                 }
             }
         }
 
+        // Start analyzer — this runs on SpeechAnalyzer's own executor
         do {
             try await analyzer.start(inputSequence: stream)
             print("[Speech] Analyzer started")
         } catch {
             print("[Speech] Analyzer start failed: \(error.localizedDescription)")
-            self.onError?(error)
+            if let onError {
+                await onError(error)
+            }
         }
     }
 
@@ -105,7 +117,7 @@ public class SpeechRecognitionManager {
 
     /// Check model availability and download if needed.
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
-        Task {
+        Task.detached {
             let locale = Locale(identifier: "zh-CN")
             let supported = await SpeechTranscriber.supportedLocales
             guard supported.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) else {
@@ -143,7 +155,7 @@ public class SpeechRecognitionManager {
 
 // MARK: - Buffer Converter (from Apple sample code)
 
-private class BufferConverter {
+private final class BufferConverter: @unchecked Sendable {
     private var converter: AVAudioConverter?
 
     func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {
@@ -165,7 +177,6 @@ private class BufferConverter {
         }
 
         var nsError: NSError?
-        // Use a reference type to avoid 'mutation of captured var in concurrently-executing code'
         let state = ConversionState()
 
         let status = converter.convert(to: conversionBuffer, error: &nsError) { _, inputStatusPointer in
@@ -182,7 +193,6 @@ private class BufferConverter {
         return conversionBuffer
     }
 
-    // Reference type wrapper to avoid captured var mutation error
     private class ConversionState {
         var processed = false
     }
