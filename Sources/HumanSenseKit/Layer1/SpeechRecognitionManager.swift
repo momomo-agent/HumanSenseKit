@@ -15,6 +15,8 @@ public class SpeechRecognitionManager {
     private var resultTask: Task<Void, Never>?
     private var analyzerTask: Task<Void, Never>?
     private var analyzerFormat: AVAudioFormat?
+    /// Serialized cleanup: each new start awaits the previous analyzer teardown.
+    private var cleanupTask: Task<Void, Never>?
 
     /// Monotonically increasing generation counter.
     /// Each startTask() increments this. If the generation changes
@@ -93,9 +95,11 @@ public class SpeechRecognitionManager {
             }
         }
 
-        // Start analyzer — use init(modules:) then start(inputSequence:)
-        // These are two separate steps per Apple's API.
+        // Start analyzer — await old cleanup first, then create new one
+        let pendingCleanup = cleanupTask
         analyzerTask = Task { [weak self] in
+            // Wait for old analyzer to fully finalize before creating a new one
+            await pendingCleanup?.value
             guard let self, self.generation == myGeneration else { return }
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
@@ -119,8 +123,8 @@ public class SpeechRecognitionManager {
     }
 
     /// Tear down all state synchronously.
-    /// The old analyzer is finalized asynchronously but we don't wait —
-    /// the generation counter ensures old tasks bail out.
+    /// The old analyzer finalization is chained into cleanupTask so the
+    /// next startTask() can await it before creating a new analyzer.
     private func tearDown() {
         let oldAnalyzer = analyzer
         let oldContinuation = inputContinuation
@@ -134,12 +138,14 @@ public class SpeechRecognitionManager {
         transcriber = nil
         analyzerFormat = nil
 
-        // Finish the old stream and finalize the old analyzer in background
-        if let oldContinuation {
-            oldContinuation.finish()
-        }
-        if let oldAnalyzer {
-            Task {
+        // Finish the old stream immediately
+        oldContinuation?.finish()
+
+        // Chain old analyzer finalization so startTask() can await it
+        let previousCleanup = cleanupTask
+        cleanupTask = Task {
+            await previousCleanup?.value
+            if let oldAnalyzer {
                 try? await oldAnalyzer.finalizeAndFinishThroughEndOfInput()
             }
         }
