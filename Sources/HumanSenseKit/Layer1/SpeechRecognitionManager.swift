@@ -11,32 +11,28 @@ import AVFoundation
 public class SpeechRecognitionManager {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: DictationTranscriber?
-    private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var resultTask: Task<Void, Never>?
     private var analyzerTask: Task<Void, Never>?
-    private var analyzerFormat: AVAudioFormat?
-    /// Serialized cleanup: each new start awaits the previous analyzer teardown.
     private var cleanupTask: Task<Void, Never>?
-
-    /// Monotonically increasing generation counter.
-    /// Each startTask() increments this. If the generation changes
-    /// mid-flight, the old task knows to bail out.
     private var generation: Int = 0
 
-    /// Called with transcription text. `isFinal` means Apple has finalized this segment.
-    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+    // nonisolated(unsafe) — accessed from audio thread via appendBuffer
+    nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+    nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
 
-    /// Called when an error occurs.
+    public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
     public var onError: ((Error) -> Void)?
 
     /// Append audio buffer to the analyzer.
-    func appendBuffer(_ buffer: AVAudioPCMBuffer) {
+    /// Called from the audio render thread — must be nonisolated.
+    nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard let continuation = inputContinuation else { return }
         guard let format = analyzerFormat else {
-            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+            continuation.yield(AnalyzerInput(buffer: buffer))
             return
         }
         if buffer.format == format {
-            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+            continuation.yield(AnalyzerInput(buffer: buffer))
         } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
             let frameCount = AVAudioFrameCount(
                 Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate
@@ -44,23 +40,18 @@ public class SpeechRecognitionManager {
             guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
             do {
                 try converter.convert(to: converted, from: buffer)
-                inputContinuation?.yield(AnalyzerInput(buffer: converted))
+                continuation.yield(AnalyzerInput(buffer: converted))
             } catch {
-                inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+                continuation.yield(AnalyzerInput(buffer: buffer))
             }
         } else {
-            inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+            continuation.yield(AnalyzerInput(buffer: buffer))
         }
     }
-
     /// Start the analyzer with a DictationTranscriber.
-    /// Safe to call multiple times — previous analyzer is torn down first.
     func startTask() {
-        // Increment generation so any in-flight old task knows to stop
         generation += 1
         let myGeneration = generation
-
-        // Tear down everything synchronously
         tearDown()
 
         print("[Speech] startTask gen=\(myGeneration)")
@@ -74,57 +65,63 @@ public class SpeechRecognitionManager {
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputContinuation = continuation
 
-        // Consume results
-        resultTask = Task { [weak self] in
+        // Consume results — detached so Speech framework runs on its own queue
+        let onResult = self.onResult
+        let onError = self.onError
+        resultTask = Task.detached { [weak self] in
             do {
                 for try await result in transcriber.results {
-                    guard let self, self.generation == myGeneration else { return }
+                    let gen = await self?.generation
+                    guard gen == myGeneration else { return }
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
                     await MainActor.run {
-                        self.onResult?(text, isFinal)
+                        onResult?(text, isFinal)
                     }
                 }
             } catch {
-                guard let self, !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
+                let gen = await self?.generation
+                guard gen == myGeneration else { return }
                 print("[Speech] Error gen=\(myGeneration): \(error.localizedDescription)")
                 await MainActor.run {
-                    self.onError?(error)
+                    onError?(error)
                 }
             }
         }
 
-        // Start analyzer — await old cleanup first, then create new one
+        // Start analyzer — detached, awaits old cleanup first
         let pendingCleanup = cleanupTask
-        analyzerTask = Task { [weak self] in
-            // Wait for old analyzer to fully finalize before creating a new one
+        analyzerTask = Task.detached { [weak self] in
             await pendingCleanup?.value
-            guard let self, self.generation == myGeneration else { return }
+            let gen = await self?.generation
+            guard gen == myGeneration else { return }
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                guard self.generation == myGeneration else { return }
-                self.analyzerFormat = format
+                let gen2 = await self?.generation
+                guard gen2 == myGeneration else { return }
+                await MainActor.run { self?.analyzerFormat = format }
 
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
-                guard self.generation == myGeneration else { return }
-                self.analyzer = analyzer
+                let gen3 = await self?.generation
+                guard gen3 == myGeneration else { return }
+                await MainActor.run { self?.analyzer = analyzer }
 
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
-                guard !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
+                let gen4 = await self?.generation
+                guard gen4 == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
                 await MainActor.run {
-                    self.onError?(error)
+                    onError?(error)
                 }
             }
         }
     }
 
-    /// Tear down all state synchronously.
-    /// The old analyzer finalization is chained into cleanupTask so the
-    /// next startTask() can await it before creating a new analyzer.
     private func tearDown() {
         let oldAnalyzer = analyzer
         let oldContinuation = inputContinuation
@@ -138,12 +135,10 @@ public class SpeechRecognitionManager {
         transcriber = nil
         analyzerFormat = nil
 
-        // Finish the old stream immediately
         oldContinuation?.finish()
 
-        // Chain old analyzer finalization so startTask() can await it
         let previousCleanup = cleanupTask
-        cleanupTask = Task {
+        cleanupTask = Task.detached {
             await previousCleanup?.value
             if let oldAnalyzer {
                 try? await oldAnalyzer.finalizeAndFinishThroughEndOfInput()
@@ -156,7 +151,6 @@ public class SpeechRecognitionManager {
         tearDown()
     }
 
-    /// Check model availability and download if needed.
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
         Task {
             let locale = Locale(identifier: "zh-CN")
