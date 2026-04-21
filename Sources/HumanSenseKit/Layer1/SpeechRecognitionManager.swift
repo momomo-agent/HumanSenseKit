@@ -165,16 +165,26 @@ private class BufferConverter {
         }
 
         var nsError: NSError?
-        var bufferProcessed = false
+        // Use a reference type to avoid 'mutation of captured var in concurrently-executing code'
+        let state = ConversionState()
 
         let status = converter.convert(to: conversionBuffer, error: &nsError) { _, inputStatusPointer in
-            defer { bufferProcessed = true }
-            inputStatusPointer.pointee = bufferProcessed ? .noDataNow : .haveData
-            return bufferProcessed ? nil : buffer
+            if state.processed {
+                inputStatusPointer.pointee = .noDataNow
+                return nil
+            }
+            state.processed = true
+            inputStatusPointer.pointee = .haveData
+            return buffer
         }
 
         guard status != .error else { throw ConversionError.conversionFailed(nsError) }
         return conversionBuffer
+    }
+
+    // Reference type wrapper to avoid captured var mutation error
+    private class ConversionState {
+        var processed = false
     }
 
     enum ConversionError: Error {
