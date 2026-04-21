@@ -60,7 +60,8 @@ public class HumanStateEngine {
         } else {
             faceManager.start()
         }
-        deviceMotionManager.start()
+        // TEMPORARILY DISABLED: CoreMotion triggers dispatch_assert_queue_fail on iOS 26 beta
+        // deviceMotionManager.start()
         
         NSLog("[Engine] Subscribing to arSessionReady (current=%d)", faceManager.arSessionReady ? 1 : 0)
         // Start STT only after ARKit is fully running (first frame received).
