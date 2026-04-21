@@ -17,8 +17,6 @@ public class SpeechRecognitionManager {
     private var analyzerFormat: AVAudioFormat?
 
     /// Monotonically increasing generation counter.
-    /// Each startTask() increments this. If the generation changes
-    /// mid-flight, the old task knows to bail out.
     private var generation: Int = 0
 
     /// Called with transcription text. `isFinal` means Apple has finalized this segment.
@@ -54,11 +52,9 @@ public class SpeechRecognitionManager {
     /// Start the analyzer with a DictationTranscriber.
     /// Safe to call multiple times — previous analyzer is torn down first.
     func startTask() {
-        // Increment generation so any in-flight old task knows to stop
         generation += 1
         let myGeneration = generation
 
-        // Tear down everything synchronously
         tearDown()
 
         print("[Speech] startTask gen=\(myGeneration)")
@@ -72,34 +68,31 @@ public class SpeechRecognitionManager {
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.inputContinuation = continuation
 
-        // Consume results
-        resultTask = Task { [weak self] in
+        // Consume results — must use @MainActor Task to access self properties safely
+        let onResult = self.onResult
+        let onError = self.onError
+        resultTask = Task { @MainActor [weak self] in
             do {
                 for try await result in transcriber.results {
                     guard let self, self.generation == myGeneration else { return }
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    await MainActor.run {
-                        self.onResult?(text, isFinal)
-                    }
+                    self.onResult?(text, isFinal)
                 }
             } catch {
-                guard let self, !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
+                guard let self, self.generation == myGeneration else { return }
                 print("[Speech] Error gen=\(myGeneration): \(error.localizedDescription)")
-                await MainActor.run {
-                    self.onError?(error)
-                }
+                self.onError?(error)
             }
         }
 
-        // Start analyzer — use init(modules:) then start(inputSequence:)
-        // These are two separate steps per Apple's API.
-        analyzerTask = Task { [weak self] in
-            guard let self, self.generation == myGeneration else { return }
+        // Start analyzer
+        analyzerTask = Task { @MainActor [weak self] in
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                guard self.generation == myGeneration else { return }
+                guard let self, self.generation == myGeneration else { return }
                 self.analyzerFormat = format
 
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -109,18 +102,14 @@ public class SpeechRecognitionManager {
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
-                guard !Task.isCancelled, self.generation == myGeneration else { return }
+                guard !Task.isCancelled else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
-                await MainActor.run {
-                    self.onError?(error)
-                }
+                guard let self, self.generation == myGeneration else { return }
+                self.onError?(error)
             }
         }
     }
 
-    /// Tear down all state synchronously.
-    /// The old analyzer is finalized asynchronously but we don't wait —
-    /// the generation counter ensures old tasks bail out.
     private func tearDown() {
         let oldAnalyzer = analyzer
         let oldContinuation = inputContinuation
@@ -134,12 +123,11 @@ public class SpeechRecognitionManager {
         transcriber = nil
         analyzerFormat = nil
 
-        // Finish the old stream and finalize the old analyzer in background
         if let oldContinuation {
             oldContinuation.finish()
         }
         if let oldAnalyzer {
-            Task {
+            Task.detached {
                 try? await oldAnalyzer.finalizeAndFinishThroughEndOfInput()
             }
         }
@@ -152,7 +140,7 @@ public class SpeechRecognitionManager {
 
     /// Check model availability and download if needed.
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
-        Task {
+        Task { @MainActor in
             let locale = Locale(identifier: "zh-CN")
             let supported = await DictationTranscriber.supportedLocales
             guard supported.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) else {
