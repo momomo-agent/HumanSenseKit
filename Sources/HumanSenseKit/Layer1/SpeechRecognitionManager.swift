@@ -59,9 +59,7 @@ public class SpeechRecognitionManager {
 
         let transcriber = SpeechTranscriber(
             locale: Locale(identifier: "zh-CN"),
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: []
+            preset: .progressiveTranscription
         )
         self.transcriber = transcriber
 
@@ -173,9 +171,7 @@ public class SpeechRecognitionManager {
             // Download model if needed
             let transcriber = SpeechTranscriber(
                 locale: locale,
-                transcriptionOptions: [],
-                reportingOptions: [.volatileResults],
-                attributeOptions: []
+                preset: .progressiveTranscription
             )
             if let request = try? await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 do {
