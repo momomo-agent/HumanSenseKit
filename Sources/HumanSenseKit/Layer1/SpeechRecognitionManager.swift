@@ -14,7 +14,9 @@ public class SpeechRecognitionManager {
     private var transcriber: DictationTranscriber?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var resultTask: Task<Void, Never>?
+    private var analyzerTask: Task<Void, Never>?
     private var analyzerFormat: AVAudioFormat?
+    private var isStarting = false
 
     /// Called with transcription text. `isFinal` means Apple has finalized this segment.
     public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
@@ -25,11 +27,9 @@ public class SpeechRecognitionManager {
     /// Append audio buffer to the analyzer.
     func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let format = analyzerFormat else {
-            // If no format conversion needed, pass directly
             inputContinuation?.yield(AnalyzerInput(buffer: buffer))
             return
         }
-        // Convert if needed
         if buffer.format == format {
             inputContinuation?.yield(AnalyzerInput(buffer: buffer))
         } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
@@ -41,7 +41,6 @@ public class SpeechRecognitionManager {
                 try converter.convert(to: converted, from: buffer)
                 inputContinuation?.yield(AnalyzerInput(buffer: converted))
             } catch {
-                // Fallback: pass original
                 inputContinuation?.yield(AnalyzerInput(buffer: buffer))
             }
         } else {
@@ -51,7 +50,22 @@ public class SpeechRecognitionManager {
 
     /// Start the analyzer with a DictationTranscriber.
     func startTask() {
-        stopTask()
+        guard !isStarting else {
+            print("[Speech] startTask skipped — already starting")
+            return
+        }
+        isStarting = true
+
+        // Stop any existing analyzer first (synchronously cancel)
+        resultTask?.cancel()
+        resultTask = nil
+        analyzerTask?.cancel()
+        analyzerTask = nil
+        inputContinuation?.finish()
+        inputContinuation = nil
+        analyzer = nil
+        transcriber = nil
+        analyzerFormat = nil
 
         let transcriber = DictationTranscriber(
             locale: Locale(identifier: "zh-CN"),
@@ -75,7 +89,7 @@ public class SpeechRecognitionManager {
                     }
                 }
             } catch {
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
                 print("[Speech] Error: \(error.localizedDescription)")
                 await MainActor.run {
                     self.onError?(error)
@@ -83,61 +97,41 @@ public class SpeechRecognitionManager {
             }
         }
 
-        // Start analyzer
-        Task {
+        // Start analyzer — only use start(), not the inputSequence init
+        analyzerTask = Task { [weak self] in
             do {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-                self.analyzerFormat = format
+                await MainActor.run { self?.analyzerFormat = format }
 
-                let analyzer = SpeechAnalyzer(
-                    inputSequence: stream,
-                    modules: [transcriber]
-                )
-                self.analyzer = analyzer
+                let analyzer = SpeechAnalyzer(modules: [transcriber])
+                await MainActor.run {
+                    self?.analyzer = analyzer
+                    self?.isStarting = false
+                }
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started")
             } catch {
+                guard !Task.isCancelled else { return }
                 print("[Speech] Analyzer start failed: \(error.localizedDescription)")
-                self.onError?(error)
+                await MainActor.run {
+                    self?.isStarting = false
+                    self?.onError?(error)
+                }
             }
         }
     }
 
-    /// Stop the analyzer.
-    func stopTask() {
+    func stop() {
         resultTask?.cancel()
         resultTask = nil
+        analyzerTask?.cancel()
+        analyzerTask = nil
         inputContinuation?.finish()
         inputContinuation = nil
-
-        Task {
-            try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-        }
         analyzer = nil
         transcriber = nil
         analyzerFormat = nil
-    }
-
-    /// Finalize current input and restart (for sentence boundary).
-    func splitTask() {
-        // With SpeechAnalyzer, we don't need manual splitting.
-        // Apple handles volatile→final transitions automatically.
-        // But if we want to force a boundary, finalize and restart.
-        print("[Speech] splitTask — finalizing and restarting")
-        let oldContinuation = inputContinuation
-        let oldAnalyzer = analyzer
-
-        Task {
-            oldContinuation?.finish()
-            try? await oldAnalyzer?.finalizeAndFinishThroughEndOfInput()
-        }
-
-        // Restart fresh
-        startTask()
-    }
-
-    func stop() {
-        stopTask()
+        isStarting = false
     }
 
     /// Check model availability and download if needed.
@@ -151,7 +145,6 @@ public class SpeechRecognitionManager {
                 return
             }
 
-            // Check if model is installed
             let installed = await DictationTranscriber.installedLocales
             if !installed.contains(where: { $0.identifier(.bcp47) == locale.identifier(.bcp47) }) {
                 print("[Speech] zh-CN model not installed, attempting download...")
