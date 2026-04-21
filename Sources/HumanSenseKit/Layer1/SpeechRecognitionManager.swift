@@ -128,9 +128,21 @@ public class SpeechRecognitionManager {
             completion(false)
             return
         }
-        SFSpeechRecognizer.requestAuthorization { status in
-            print("[Speech] Auth status: \(status.rawValue)")
-            completion(status == .authorized)
+        // Check existing status first — avoid requestAuthorization which
+        // triggers dispatch_assert_queue_fail on iOS 26 beta.
+        let status = SFSpeechRecognizer.authorizationStatus()
+        print("[Speech] Current auth status: \(status.rawValue)")
+        if status == .authorized {
+            completion(true)
+            return
+        }
+        if status == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { status in
+                print("[Speech] Auth result: \(status.rawValue)")
+                completion(status == .authorized)
+            }
+        } else {
+            completion(false)
         }
     }
     
