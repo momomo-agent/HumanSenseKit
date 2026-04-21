@@ -86,7 +86,7 @@ public class AudioEngineManager {
         }
         retryCount = 0
         
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { @Sendable [weak self] buffer, _ in
             self?.onBuffer?(buffer)
         }
         

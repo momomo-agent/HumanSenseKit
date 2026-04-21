@@ -82,11 +82,15 @@ public class STTManager: NSObject, ObservableObject {
     // MARK: - Wiring
 
     private func wireUp() {
+        // Capture sub-components directly — avoid accessing @MainActor self from audio thread
+        let speech = self.speech
+        weak var audioDetection = self.audioDetectionManager
+
         // Layer 0 → Layer 1: audio buffers feed recognition
-        audio.onBuffer = { [weak self] buffer in
-            self?.speech.appendBuffer(buffer)
+        audio.onBuffer = { buffer in
+            speech.appendBuffer(buffer)
             Task { @MainActor in
-                self?.audioDetectionManager?.processBuffer(buffer)
+                audioDetection?.processBuffer(buffer)
             }
         }
 
