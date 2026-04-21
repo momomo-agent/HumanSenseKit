@@ -19,14 +19,13 @@ public class SpeechRecognitionManager {
     // nonisolated(unsafe) — written on MainActor, read from audio thread
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
-    nonisolated(unsafe) private var analyzerReady: Bool = false
 
     public var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
     public var onError: ((Error) -> Void)?
 
     /// Called from audio render thread — must be nonisolated.
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard analyzerReady, let continuation = inputContinuation else { return }
+        guard let continuation = inputContinuation else { return }
         guard let format = analyzerFormat else {
             continuation.yield(AnalyzerInput(buffer: buffer))
             return
@@ -67,6 +66,8 @@ public class SpeechRecognitionManager {
         self.transcriber = transcriber
 
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        // Open immediately — AsyncStream buffers until analyzer starts consuming
+        self.inputContinuation = continuation
 
         // Consume results — start BEFORE analyzer so we don't miss anything
         resultTask = Task { [weak self] in
@@ -102,10 +103,6 @@ public class SpeechRecognitionManager {
                 // start() returns immediately — analyzer begins consuming stream
                 try await analyzer.start(inputSequence: stream)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
-
-                // Open the buffer gate
-                self.inputContinuation = continuation
-                self.analyzerReady = true
             } catch {
                 guard !Task.isCancelled, self.generation == myGeneration else { return }
                 print("[Speech] Analyzer start failed gen=\(myGeneration): \(error.localizedDescription)")
@@ -115,7 +112,6 @@ public class SpeechRecognitionManager {
     }
 
     private func tearDown() {
-        analyzerReady = false
         let oldAnalyzer = analyzer
         let oldContinuation = inputContinuation
 
