@@ -19,10 +19,11 @@ public class AudioEngineManager {
     public var usesExternalEngine = false
     
     /// Called when audio buffers are available.
-    public var onBuffer: ((AVAudioPCMBuffer) -> Void)?
-    
+    /// nonisolated(unsafe) because the audio tap fires on the render thread.
+    public nonisolated(unsafe) var onBuffer: ((AVAudioPCMBuffer) -> Void)?
+
     /// Called when the engine needs to be restarted (after interruption/death).
-    public var onRestart: (() -> Void)?
+    public nonisolated(unsafe) var onRestart: (() -> Void)?
     
     private(set) var isRunning = false
     private var retryCount: Int = 0
