@@ -2,8 +2,8 @@
 import Foundation
 
 /// Correlates multi-blendshape lip activity with audio energy over a sliding window.
-/// Uses sum of frame-to-frame deltas across 8 lip blendshapes as "lip energy",
-/// then Pearson-correlates with audio RMS. High correlation = real speech.
+/// Uses cross-correlation to automatically find the best time offset between lip and audio,
+/// then reports the peak Pearson r at that offset.
 @MainActor
 public class LipAudioCorrelator {
     public struct LipFrame {
@@ -19,7 +19,7 @@ public class LipAudioCorrelator {
 
     private struct Sample {
         let timestamp: TimeInterval
-        let lipActivity: Float  // sum of |delta| across all lip blendshapes
+        let lipActivity: Float
         let audioRMS: Float
     }
 
@@ -31,8 +31,11 @@ public class LipAudioCorrelator {
         public let audioRMS: Float
     }
 
-    /// Rolling correlation coefficient [-1, 1].
+    /// Best correlation coefficient found across all tested offsets [-1, 1].
     public private(set) var correlation: Float = 0
+
+    /// Best offset in frames (positive = lip leads audio). For debug display.
+    public private(set) var bestOffset: Int = 0
 
     /// Current lip activity value (for debug display).
     public private(set) var lipActivity: Float = 0
@@ -48,7 +51,6 @@ public class LipAudioCorrelator {
     public var samplePoints: [SamplePoint] {
         guard let first = samples.first else { return [] }
         let baseTime = first.timestamp
-        // Find max values for normalization
         let maxLip = samples.map(\.lipActivity).max() ?? 1
         let maxRMS = samples.map(\.audioRMS).max() ?? 1
         let normLip = maxLip > 0.001 ? maxLip : 1
@@ -65,22 +67,19 @@ public class LipAudioCorrelator {
 
     private var samples: [Sample] = []
     private var previousFrame: LipFrame?
-    private let windowDuration: TimeInterval = 1.0  // 1s sliding window
+    private let windowDuration: TimeInterval = 1.0
     private let correlationThreshold: Float = 0.15
     private let minSamples = 15  // ~250ms at 60fps
-
-    // Audio arrives ~50-100ms after lip movement (mic buffer + processing delay).
-    // We delay lip samples by N frames so they align with the corresponding audio.
-    private let lipDelayFrames = 5  // ~83ms at 60fps
-    private var lipDelayBuffer: [(activity: Float, timestamp: TimeInterval)] = []
+    // Cross-correlation search range: -2 to +10 frames (~-33ms to +167ms)
+    // Negative = audio leads lip (unlikely), positive = lip leads audio (expected)
+    private let minLag = -2
+    private let maxLag = 10
 
     public init() {}
 
     /// Add a new sample every ARKit frame (~60fps).
     public func addSample(face: LipFrame, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        // Compute lip activity = weighted sum of mouth blendshape values
-        // Higher when mouth is actively moving/open during speech
-        let activity = face.jawOpen * 2.0  // jaw is the strongest signal
+        let activity = face.jawOpen * 2.0
                      + face.mouthFunnel
                      + face.mouthPucker
                      + face.mouthLeft
@@ -90,46 +89,75 @@ public class LipAudioCorrelator {
         previousFrame = face
         lipActivity = activity
 
-        // Delay lip signal to align with audio (lip leads audio by ~80ms)
-        lipDelayBuffer.append((activity: activity, timestamp: timestamp))
-        guard lipDelayBuffer.count > lipDelayFrames else { return }
-        let delayed = lipDelayBuffer.removeFirst()
-
-        samples.append(Sample(timestamp: timestamp, lipActivity: delayed.activity, audioRMS: audioRMS))
+        samples.append(Sample(timestamp: timestamp, lipActivity: activity, audioRMS: audioRMS))
 
         // Trim old samples outside window
         let cutoff = timestamp - windowDuration
         samples.removeAll { $0.timestamp < cutoff }
 
-        // Recompute correlation — only on frames where audio is active
-        // Silent frames dilute the correlation (both signals are ~constant)
-        let activeFrames = samples.filter { $0.audioRMS > 0.001 }
-        if activeFrames.count >= minSamples {
-            correlation = pearsonCorrelation(
-                xs: activeFrames.map(\.lipActivity),
-                ys: activeFrames.map(\.audioRMS)
-            )
-        } else if samples.count >= minSamples {
-            // Not enough active frames — use all samples but lower confidence
-            correlation = pearsonCorrelation(
-                xs: samples.map(\.lipActivity),
-                ys: samples.map(\.audioRMS)
-            )
-        } else {
+        // Need enough samples for cross-correlation
+        guard samples.count >= minSamples + maxLag else {
             correlation = 0
+            return
         }
+
+        // Filter to active frames for the audio-active check
+        let activeCount = samples.filter { $0.audioRMS > 0.001 }.count
+        guard activeCount >= minSamples / 2 else {
+            // Not enough audio activity — can't determine correlation
+            correlation = 0
+            return
+        }
+
+        // Cross-correlation: try different offsets, find the best Pearson r
+        let lip = samples.map(\.lipActivity)
+        let audio = samples.map(\.audioRMS)
+        let n = lip.count
+
+        var bestR: Float = -2
+        var bestLag = 0
+
+        for lag in minLag...maxLag {
+            // At lag L: pair lip[i] with audio[i+L]
+            // Positive lag means lip is shifted right (lip leads audio)
+            let start = max(0, -lag)
+            let end = min(n, n - lag)
+            guard end - start >= minSamples else { continue }
+
+            var xs: [Float] = []
+            var ys: [Float] = []
+            for i in start..<end {
+                let j = i + lag
+                guard j >= 0 && j < n else { continue }
+                // Only include frames where at least one signal is active
+                if audio[j] > 0.001 || lip[i] > 0.1 {
+                    xs.append(lip[i])
+                    ys.append(audio[j])
+                }
+            }
+
+            guard xs.count >= minSamples / 2 else { continue }
+
+            let r = pearsonCorrelation(xs: xs, ys: ys)
+            if r > bestR {
+                bestR = r
+                bestLag = lag
+            }
+        }
+
+        correlation = bestR > -2 ? bestR : 0
+        bestOffset = bestLag
     }
 
     public func reset() {
         samples.removeAll()
         previousFrame = nil
-        lipDelayBuffer.removeAll()
         correlation = 0
         lipActivity = 0
+        bestOffset = 0
     }
 
-    /// Dump current window data for debugging. Returns CSV-like lines:
-    /// timestamp_offset, lipActivity, audioRMS
+    /// Dump current window data for debugging.
     public func dumpWindow() -> String {
         guard let first = samples.first else { return "(empty)" }
         let baseTime = first.timestamp
@@ -140,7 +168,7 @@ public class LipAudioCorrelator {
             lines.append(String(format: "%d,%.3f,%.4f,%d", tMs, s.lipActivity, s.audioRMS, active))
         }
         let activeCount = samples.filter { $0.audioRMS > 0.001 }.count
-        lines.append("# total=\(samples.count) active=\(activeCount) r=\(String(format: "%.3f", correlation))")
+        lines.append("# total=\(samples.count) active=\(activeCount) r=\(String(format: "%.3f", correlation)) offset=\(bestOffset)")
         return lines.joined(separator: "\n")
     }
 
