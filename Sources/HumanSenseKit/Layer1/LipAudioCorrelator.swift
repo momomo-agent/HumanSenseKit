@@ -39,15 +39,15 @@ public class LipAudioCorrelator {
     private var samples: [Sample] = []
     private var previousFrame: LipFrame?
     private let windowDuration: TimeInterval = 1.0  // 1s sliding window (was 600ms)
-    private let correlationThreshold: Float = 0.2
+    private let correlationThreshold: Float = 0.15
     private let minSamples = 15  // ~250ms at 60fps
 
     public init() {}
 
     /// Add a new sample every ARKit frame (~60fps).
     public func addSample(face: LipFrame, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        // Compute lip activity = weighted sum of absolute blendshape values
-        // Speech opens the mouth in various ways — the total "openness" correlates with volume
+        // Compute lip activity = weighted sum of mouth blendshape values
+        // Higher when mouth is actively moving/open during speech
         let activity = face.jawOpen * 2.0  // jaw is the strongest signal
                      + face.mouthFunnel
                      + face.mouthPucker
@@ -55,7 +55,6 @@ public class LipAudioCorrelator {
                      + face.mouthRight
                      + face.mouthStretchLeft
                      + face.mouthStretchRight
-                     + (1.0 - face.mouthClose)  // mouthClose=1 means lips sealed, invert it
         previousFrame = face
         lipActivity = activity
 
@@ -65,8 +64,16 @@ public class LipAudioCorrelator {
         let cutoff = timestamp - windowDuration
         samples.removeAll { $0.timestamp < cutoff }
 
-        // Recompute correlation
-        if samples.count >= minSamples {
+        // Recompute correlation — only on frames where audio is active
+        // Silent frames dilute the correlation (both signals are ~constant)
+        let activeFrames = samples.filter { $0.audioRMS > 0.001 }
+        if activeFrames.count >= minSamples {
+            correlation = pearsonCorrelation(
+                xs: activeFrames.map(\.lipActivity),
+                ys: activeFrames.map(\.audioRMS)
+            )
+        } else if samples.count >= minSamples {
+            // Not enough active frames — use all samples but lower confidence
             correlation = pearsonCorrelation(
                 xs: samples.map(\.lipActivity),
                 ys: samples.map(\.audioRMS)
