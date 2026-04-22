@@ -1,36 +1,69 @@
 #if os(iOS)
 import Foundation
 
-/// Correlates lip movement (jawOpen delta) with audio energy (RMS) over a sliding window.
-/// High correlation = user is actually speaking. Low correlation = ambient sound + incidental mouth movement.
+/// Correlates multi-blendshape lip activity with audio energy over a sliding window.
+/// Uses sum of frame-to-frame deltas across 8 lip blendshapes as "lip energy",
+/// then Pearson-correlates with audio RMS. High correlation = real speech.
 @MainActor
 public class LipAudioCorrelator {
-    public struct Sample {
-        let timestamp: TimeInterval
-        let jawDelta: Float    // |jawOpen - prevJawOpen|
-        let audioRMS: Float    // mic RMS energy
+    public struct LipFrame {
+        let jawOpen: Float
+        let mouthClose: Float
+        let mouthFunnel: Float
+        let mouthPucker: Float
+        let mouthLeft: Float
+        let mouthRight: Float
+        let mouthStretchLeft: Float
+        let mouthStretchRight: Float
     }
 
-    /// Rolling correlation coefficient [-1, 1]. > 0.3 suggests real speech.
+    private struct Sample {
+        let timestamp: TimeInterval
+        let lipActivity: Float  // sum of |delta| across all lip blendshapes
+        let audioRMS: Float
+    }
+
+    /// Rolling correlation coefficient [-1, 1].
     public private(set) var correlation: Float = 0
+
+    /// Current lip activity value (for debug display).
+    public private(set) var lipActivity: Float = 0
 
     /// Whether lip movement and audio are correlated enough to be real speech.
     /// Returns true when not enough data yet (benefit of the doubt).
     public var isCorrelated: Bool {
-        if samples.count < minSamples { return true }  // not enough data, assume user
+        if samples.count < minSamples { return true }
         return correlation > correlationThreshold
     }
 
     private var samples: [Sample] = []
-    private let windowDuration: TimeInterval = 0.6  // 600ms sliding window
-    private let correlationThreshold: Float = 0.25
-    private let minSamples = 8  // need enough data points
+    private var previousFrame: LipFrame?
+    private let windowDuration: TimeInterval = 1.0  // 1s sliding window (was 600ms)
+    private let correlationThreshold: Float = 0.2
+    private let minSamples = 15  // ~250ms at 60fps
 
     public init() {}
 
-    /// Add a new sample. Call this every ARKit frame (~60fps).
-    public func addSample(jawDelta: Float, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        samples.append(Sample(timestamp: timestamp, jawDelta: jawDelta, audioRMS: audioRMS))
+    /// Add a new sample every ARKit frame (~60fps).
+    public func addSample(face: LipFrame, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        // Compute lip activity = sum of absolute deltas across all blendshapes
+        let activity: Float
+        if let prev = previousFrame {
+            activity = abs(face.jawOpen - prev.jawOpen)
+                     + abs(face.mouthClose - prev.mouthClose)
+                     + abs(face.mouthFunnel - prev.mouthFunnel)
+                     + abs(face.mouthPucker - prev.mouthPucker)
+                     + abs(face.mouthLeft - prev.mouthLeft)
+                     + abs(face.mouthRight - prev.mouthRight)
+                     + abs(face.mouthStretchLeft - prev.mouthStretchLeft)
+                     + abs(face.mouthStretchRight - prev.mouthStretchRight)
+        } else {
+            activity = 0
+        }
+        previousFrame = face
+        lipActivity = activity
+
+        samples.append(Sample(timestamp: timestamp, lipActivity: activity, audioRMS: audioRMS))
 
         // Trim old samples outside window
         let cutoff = timestamp - windowDuration
@@ -39,7 +72,7 @@ public class LipAudioCorrelator {
         // Recompute correlation
         if samples.count >= minSamples {
             correlation = pearsonCorrelation(
-                xs: samples.map(\.jawDelta),
+                xs: samples.map(\.lipActivity),
                 ys: samples.map(\.audioRMS)
             )
         } else {
@@ -49,7 +82,9 @@ public class LipAudioCorrelator {
 
     public func reset() {
         samples.removeAll()
+        previousFrame = nil
         correlation = 0
+        lipActivity = 0
     }
 
     // MARK: - Pearson correlation

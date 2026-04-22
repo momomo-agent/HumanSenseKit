@@ -136,6 +136,12 @@ extension FaceTrackingManager: ARSessionDelegate {
         let bs = anchor.blendShapes
         let jawOpen = bs[.jawOpen]?.floatValue ?? 0
         let mouthClose = bs[.mouthClose]?.floatValue ?? 0
+        let mouthFunnel = bs[.mouthFunnel]?.floatValue ?? 0
+        let mouthPucker = bs[.mouthPucker]?.floatValue ?? 0
+        let mouthLeft = bs[.mouthLeft]?.floatValue ?? 0
+        let mouthRight = bs[.mouthRight]?.floatValue ?? 0
+        let mouthStretchLeft = bs[.mouthStretchLeft]?.floatValue ?? 0
+        let mouthStretchRight = bs[.mouthStretchRight]?.floatValue ?? 0
         let eyeBlinkL = bs[.eyeBlinkLeft]?.floatValue ?? 0
         let eyeBlinkR = bs[.eyeBlinkRight]?.floatValue ?? 0
         let eyeLookInL = bs[.eyeLookInLeft]?.floatValue ?? 0
@@ -193,6 +199,12 @@ extension FaceTrackingManager: ARSessionDelegate {
 
             newState.jawOpen = jawOpen
             newState.mouthClose = mouthClose
+            newState.mouthFunnel = mouthFunnel
+            newState.mouthPucker = mouthPucker
+            newState.mouthLeft = mouthLeft
+            newState.mouthRight = mouthRight
+            newState.mouthStretchLeft = mouthStretchLeft
+            newState.mouthStretchRight = mouthStretchRight
             newState.eyeBlinkLeft = eyeBlinkL
             newState.eyeBlinkRight = eyeBlinkR
             newState.eyeLookInLeft = eyeLookInL

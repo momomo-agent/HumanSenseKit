@@ -32,6 +32,12 @@ public struct FaceState {
     // Mouth
     public var jawOpen: Float = 0
     public var mouthClose: Float = 0
+    public var mouthFunnel: Float = 0
+    public var mouthPucker: Float = 0
+    public var mouthLeft: Float = 0
+    public var mouthRight: Float = 0
+    public var mouthStretchLeft: Float = 0
+    public var mouthStretchRight: Float = 0
 
     // Eyes
     public var eyeBlinkLeft: Float = 0
