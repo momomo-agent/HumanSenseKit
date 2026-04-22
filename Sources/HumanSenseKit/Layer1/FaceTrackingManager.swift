@@ -182,31 +182,16 @@ extension FaceTrackingManager: ARSessionDelegate {
             newState.distanceFromCamera = distance
 
             let screenSize = self.cachedScreenSize
-            let marginRatio: CGFloat = 0.1
-            let marginX = screenSize.width * marginRatio
-            let marginY = screenSize.height * marginRatio
+            let marginX = screenSize.width * 0.1
+            let marginYTop = screenSize.height * 0.05     // relaxed top margin (lying down shifts gaze up)
+            let marginYBottom = screenSize.height * 0.05  // relaxed bottom margin
             let gazeX = self.gazeFilterX?.value ?? adjustedX
             let gazeY = self.gazeFilterY?.value ?? adjustedY
             let gazeInScreen = gazeX > marginX && gazeX < screenSize.width - marginX &&
-                              gazeY > marginY && gazeY < screenSize.height - marginY
-            // Head pose: yaw ±30°, pitch -40°..25° for normal posture
-            let headForward = (-0.52...0.52).contains(yaw)
-            let normalPosture = (-0.7...0.45).contains(pitch)
-            
-            if normalPosture {
-                // Normal posture: trust ARKit gaze projection
-                let headPoseValid = headForward && normalPosture
-                newState.isLookingAtScreen = gazeInScreen && headPoseValid
-            } else if headForward {
-                // Lying down (pitch > 0.45): ARKit projection unreliable,
-                // use blendShape gaze with tighter thresholds
-                let bsGazeH = abs(newState.gazeH)
-                let bsGazeV = abs(newState.gazeV)
-                let eyesLookingForward = bsGazeH < 0.15 && bsGazeV < 0.2
-                newState.isLookingAtScreen = eyesLookingForward
-            } else {
-                newState.isLookingAtScreen = false
-            }
+                              gazeY > marginYTop && gazeY < screenSize.height - marginYBottom
+            // Head pose check: pitch -40°..50°, yaw ±30°
+            let headPoseValid = (-0.7...0.87).contains(pitch) && (-0.52...0.52).contains(yaw)
+            newState.isLookingAtScreen = gazeInScreen && headPoseValid
 
             newState.jawOpen = jawOpen
             newState.mouthClose = mouthClose
