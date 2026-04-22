@@ -56,8 +56,8 @@ public class LipAudioCorrelator {
     public var samplePoints: [SamplePoint] {
         guard let first = envelopeSamples.first else { return [] }
         let baseTime = first.timestamp
-        // Fixed scale: lip envelope 0-1.5, audio envelope 0-0.02
-        let lipScale: Float = 1.5
+        // Fixed scale: lip envelope 0-0.5 (deviation from baseline), audio envelope 0-0.02
+        let lipScale: Float = 0.5
         let audioScale: Float = 0.02
         return envelopeSamples.enumerated().map { i, s in
             SamplePoint(
@@ -94,6 +94,10 @@ public class LipAudioCorrelator {
     private let emaAlpha: Float = 0.15
     private var lipEMA: Float = 0
     private var audioEMA: Float = 0
+    // Baseline tracking: very slow EMA to track resting lip level
+    private let baselineAlpha: Float = 0.005  // ~0.3Hz at 60fps, tracks resting state
+    private var lipBaseline: Float = 0
+    private var baselineInitialized = false
 
     public init() {}
 
@@ -109,14 +113,25 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
+        // Track resting baseline (very slow EMA)
+        if !baselineInitialized {
+            lipBaseline = activity
+            baselineInitialized = true
+        } else {
+            lipBaseline = baselineAlpha * activity + (1 - baselineAlpha) * lipBaseline
+        }
+
+        // Subtract baseline: only keep the deviation from resting state
+        let lipDeviation = max(0, activity - lipBaseline)
+
         rawSamples.append(RawSample(timestamp: timestamp, lipActivity: activity, audioRMS: audioRMS))
 
         // Trim old raw samples
         let cutoff = timestamp - windowDuration
         rawSamples.removeAll { $0.timestamp < cutoff }
 
-        // Update exponential moving averages (low-pass filter → envelope)
-        lipEMA = emaAlpha * activity + (1 - emaAlpha) * lipEMA
+        // Update EMAs on DEVIATION (not absolute value)
+        lipEMA = emaAlpha * lipDeviation + (1 - emaAlpha) * lipEMA
         audioEMA = emaAlpha * audioRMS + (1 - emaAlpha) * audioEMA
 
         envelopeSamples.append(EnvelopeSample(
@@ -162,6 +177,8 @@ public class LipAudioCorrelator {
         envelopeSamples.removeAll()
         lipEMA = 0
         audioEMA = 0
+        lipBaseline = 0
+        baselineInitialized = false
         correlation = 0
         lipActivity = 0
         bothCount = 0
