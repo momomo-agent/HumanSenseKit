@@ -87,6 +87,7 @@ public class LipAudioCorrelator {
     private let cooccurrenceThreshold: Float = 0.3  // 30% of active frames must be both
     private let minActiveFrames = 8  // need at least ~130ms of activity
     private let lipDeltaThreshold: Float = 0.03  // lip must CHANGE by this much frame-to-frame
+    private let jawOpenThreshold: Float = 0.12  // jaw open above this = mouth is open (laughing/speaking)
     private let audioThreshold: Float = 0.001  // audio RMS above this = "sound present"
 
     public init() {}
@@ -103,11 +104,13 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        // Detect lip MOVEMENT (change), not just position
+        // Detect lip activity: either mouth is MOVING (delta) or OPEN (jawOpen)
+        // "哈哈哈" = jaw stays open, delta is small but jawOpen is high
+        // Normal speech = jaw opening/closing, delta is high
         let delta = abs(activity - previousActivity)
         previousActivity = activity
 
-        let lipOn = delta > lipDeltaThreshold
+        let lipOn = delta > lipDeltaThreshold || face.jawOpen > jawOpenThreshold
         let audioOn = audioRMS > audioThreshold
 
         samples.append(Sample(
