@@ -65,9 +65,14 @@ public class LipAudioCorrelator {
 
     private var samples: [Sample] = []
     private var previousFrame: LipFrame?
-    private let windowDuration: TimeInterval = 1.0  // 1s sliding window (was 600ms)
+    private let windowDuration: TimeInterval = 1.0  // 1s sliding window
     private let correlationThreshold: Float = 0.15
     private let minSamples = 15  // ~250ms at 60fps
+
+    // Audio arrives ~50-100ms after lip movement (mic buffer + processing delay).
+    // We delay lip samples by N frames so they align with the corresponding audio.
+    private let lipDelayFrames = 5  // ~83ms at 60fps
+    private var lipDelayBuffer: [(activity: Float, timestamp: TimeInterval)] = []
 
     public init() {}
 
@@ -85,7 +90,12 @@ public class LipAudioCorrelator {
         previousFrame = face
         lipActivity = activity
 
-        samples.append(Sample(timestamp: timestamp, lipActivity: activity, audioRMS: audioRMS))
+        // Delay lip signal to align with audio (lip leads audio by ~80ms)
+        lipDelayBuffer.append((activity: activity, timestamp: timestamp))
+        guard lipDelayBuffer.count > lipDelayFrames else { return }
+        let delayed = lipDelayBuffer.removeFirst()
+
+        samples.append(Sample(timestamp: timestamp, lipActivity: delayed.activity, audioRMS: audioRMS))
 
         // Trim old samples outside window
         let cutoff = timestamp - windowDuration
@@ -113,6 +123,7 @@ public class LipAudioCorrelator {
     public func reset() {
         samples.removeAll()
         previousFrame = nil
+        lipDelayBuffer.removeAll()
         correlation = 0
         lipActivity = 0
     }
