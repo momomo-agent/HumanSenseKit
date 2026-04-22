@@ -65,10 +65,8 @@ public class SentenceBuilder {
             // Update existing sentence
             activeSentence?.text = text
 
-            // If user starts speaking mid-sentence, upgrade to user speech
-            if isSpeaking && activeSentence?.isFromUser == false {
-                activeSentence?.isFromUser = true
-            }
+            // Sync isFromUser with current isSpeaking state
+            activeSentence?.isFromUser = isSpeaking
 
             if addedChars > 0, activeSentence?.startedLookingAtScreen == true {
                 updateGazeSpans(addedChars: addedChars)
