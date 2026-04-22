@@ -15,7 +15,11 @@ public class LipAudioCorrelator {
     public private(set) var correlation: Float = 0
 
     /// Whether lip movement and audio are correlated enough to be real speech.
-    public var isCorrelated: Bool { correlation > correlationThreshold }
+    /// Returns true when not enough data yet (benefit of the doubt).
+    public var isCorrelated: Bool {
+        if samples.count < minSamples { return true }  // not enough data, assume user
+        return correlation > correlationThreshold
+    }
 
     private var samples: [Sample] = []
     private let windowDuration: TimeInterval = 0.6  // 600ms sliding window
