@@ -46,7 +46,13 @@ public class STTManager: NSObject, ObservableObject {
         didSet { builder.isLookingAtScreen = isLookingAtScreen }
     }
     public var isSpeaking: Bool = false {
-        didSet { builder.isSpeaking = isSpeaking }
+        didSet {
+            builder.isSpeaking = isSpeaking
+            // Rebuild segments so isFromUser reflects new state immediately
+            if oldValue != isSpeaking {
+                rebuildSegments()
+            }
+        }
     }
 
     public func captureSpeechStartState() {}
