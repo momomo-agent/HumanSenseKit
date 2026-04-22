@@ -83,12 +83,14 @@ public class LipAudioCorrelator {
 
     private var samples: [Sample] = []
     private var previousActivity: Float = 0
+    private var recentDeltas: [Float] = []  // rolling window of recent deltas
     private let windowDuration: TimeInterval = 1.0
-    private let cooccurrenceThreshold: Float = 0.3  // 30% of active frames must be both
-    private let minActiveFrames = 8  // need at least ~130ms of activity
-    private let lipDeltaThreshold: Float = 0.03  // lip must CHANGE by this much frame-to-frame
-    private let jawOpenThreshold: Float = 0.12  // jaw open above this = mouth is open (laughing/speaking)
-    private let audioThreshold: Float = 0.001  // audio RMS above this = "sound present"
+    private let cooccurrenceThreshold: Float = 0.3
+    private let minActiveFrames = 8
+    private let lipDeltaThreshold: Float = 0.03  // single-frame delta
+    private let rollingDeltaThreshold: Float = 0.15  // sum of last 5 deltas (catches sustained open mouth with micro-movements)
+    private let rollingDeltaWindow = 5  // frames to accumulate
+    private let audioThreshold: Float = 0.001
 
     public init() {}
 
@@ -104,13 +106,16 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        // Detect lip activity: either mouth is MOVING (delta) or OPEN (jawOpen)
-        // "哈哈哈" = jaw stays open, delta is small but jawOpen is high
-        // Normal speech = jaw opening/closing, delta is high
+        // Detect lip activity: either single-frame delta OR accumulated micro-movements
+        // "哈哈哈" = jaw stays open with tiny vibrations, each delta < 0.03 but sum of 5 > 0.15
         let delta = abs(activity - previousActivity)
         previousActivity = activity
 
-        let lipOn = delta > lipDeltaThreshold || face.jawOpen > jawOpenThreshold
+        recentDeltas.append(delta)
+        if recentDeltas.count > rollingDeltaWindow { recentDeltas.removeFirst() }
+        let rollingDelta = recentDeltas.reduce(0, +)
+
+        let lipOn = delta > lipDeltaThreshold || rollingDelta > rollingDeltaThreshold
         let audioOn = audioRMS > audioThreshold
 
         samples.append(Sample(
@@ -148,6 +153,7 @@ public class LipAudioCorrelator {
     public func reset() {
         samples.removeAll()
         previousActivity = 0
+        recentDeltas.removeAll()
         correlation = 0
         lipActivity = 0
         bothCount = 0
