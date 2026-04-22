@@ -67,6 +67,14 @@ public class HumanStateEngine {
             )
         }
 
+        // Dump correlator window on sentence finalization for debug
+        sttManager.onSentenceFinalized = { [weak self] text in
+            guard let self else { return }
+            let dump = self.lipAudioCorrelator.dumpWindow()
+            print("[LipCorr] Sentence: '\(text.prefix(40))' r=\(String(format: "%.3f", self.lipAudioCorrelator.correlation))")
+            print(dump)
+        }
+
         setupBindings()
     }
 

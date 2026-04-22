@@ -90,6 +90,22 @@ public class LipAudioCorrelator {
         lipActivity = 0
     }
 
+    /// Dump current window data for debugging. Returns CSV-like lines:
+    /// timestamp_offset, lipActivity, audioRMS
+    public func dumpWindow() -> String {
+        guard let first = samples.first else { return "(empty)" }
+        let baseTime = first.timestamp
+        var lines = ["t_ms,lip,rms,active"]
+        for s in samples {
+            let tMs = Int((s.timestamp - baseTime) * 1000)
+            let active = s.audioRMS > 0.001 ? 1 : 0
+            lines.append(String(format: "%d,%.3f,%.4f,%d", tMs, s.lipActivity, s.audioRMS, active))
+        }
+        let activeCount = samples.filter { $0.audioRMS > 0.001 }.count
+        lines.append("# total=\(samples.count) active=\(activeCount) r=\(String(format: "%.3f", correlation))")
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Pearson correlation
 
     private func pearsonCorrelation(xs: [Float], ys: [Float]) -> Float {

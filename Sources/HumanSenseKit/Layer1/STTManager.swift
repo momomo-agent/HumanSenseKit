@@ -21,6 +21,9 @@ public class STTManager: NSObject, ObservableObject {
         case sfSpeechRecognizer
     }
 
+    /// Called when a sentence is finalized — for debug logging.
+    public var onSentenceFinalized: ((_ text: String) -> Void)?
+
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
         get { builder.captureSignals }
@@ -133,6 +136,7 @@ public class STTManager: NSObject, ObservableObject {
             self.builder.handleResult(text: text, isFinal: isFinal)
             if isFinal {
                 // Apple finalized this segment — reset for next sentence
+                self.onSentenceFinalized?(text)
                 self.builder.resetActive()
             }
             self.rebuildSegments()
