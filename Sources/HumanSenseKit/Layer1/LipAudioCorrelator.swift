@@ -1,9 +1,14 @@
 #if os(iOS)
 import Foundation
 
-/// Detects whether the user is speaking by checking co-occurrence of lip movement and audio.
-/// Instead of correlating waveforms (Pearson), simply counts how often lip and audio
-/// are active at the same time. Immune to time offsets and amplitude differences.
+/// Detects whether the user is speaking by comparing the energy envelopes
+/// of lip movement and audio. Instead of frame-level correlation or co-occurrence,
+/// extracts low-frequency envelopes (~3-6Hz, matching syllable rate) and correlates those.
+///
+/// This is robust to:
+/// - Frame-level time offsets (envelope is low-freq, 50ms offset doesn't matter)
+/// - Micro-jitter and noise (smoothed out by the envelope)
+/// - "哈哈哈" (laughing has a 3-5Hz rhythm that shows in both envelopes)
 @MainActor
 public class LipAudioCorrelator {
     public struct LipFrame {
@@ -17,80 +22,78 @@ public class LipAudioCorrelator {
         let mouthStretchRight: Float
     }
 
-    private struct Sample {
-        let timestamp: TimeInterval
-        let lipActivity: Float      // absolute value for visualization
-        let lipDelta: Float          // frame-to-frame change for detection
-        let audioRMS: Float
-        let lipActive: Bool
-        let audioActive: Bool
-    }
-
     /// Public snapshot of samples for visualization
     public struct SamplePoint: Identifiable {
         public let id: Int
         public let timeOffset: Float  // seconds from window start
-        public let lipActivity: Float  // normalized 0-1
-        public let audioRMS: Float     // normalized 0-1
+        public let lipActivity: Float  // normalized 0-1 (envelope)
+        public let audioRMS: Float     // normalized 0-1 (envelope)
     }
 
     // MARK: - Public state
 
-    /// Co-occurrence ratio [0, 1]. High = user is speaking.
+    /// Envelope correlation [-1, 1]. High positive = user is speaking.
     public private(set) var correlation: Float = 0
 
-    /// Current lip activity value (for debug display).
+    /// Current raw lip activity value (for debug display).
     public private(set) var lipActivity: Float = 0
 
-    /// Best offset — always 0 for co-occurrence (no offset needed).
+    /// Always 0 for envelope method (no offset search needed).
     public let bestOffset: Int = 0
 
-    /// Frame counts for debug
-    public private(set) var bothCount: Int = 0
-    public private(set) var lipOnlyCount: Int = 0
-    public private(set) var audioOnlyCount: Int = 0
+    /// Frame counts for debug display (reused names for UI compatibility)
+    public private(set) var bothCount: Int = 0    // frames where both envelopes are rising
+    public private(set) var lipOnlyCount: Int = 0  // lip envelope rising, audio flat
+    public private(set) var audioOnlyCount: Int = 0 // audio envelope rising, lip flat
 
-    /// Whether the user is speaking (lip + audio co-occurring).
+    /// Whether the user is speaking.
     public var isCorrelated: Bool {
-        let activeFrames = bothCount + lipOnlyCount + audioOnlyCount
-        // Not enough activity data
-        if activeFrames < minActiveFrames { return false }
-        // Primary check: enough frames where both lip AND audio are active
-        // "哈哈哈" = ~0.3s = ~18 frames, need at least 5 both frames
-        if bothCount >= 5 { return true }
-        // Fallback: ratio check for longer utterances
-        return correlation > cooccurrenceThreshold
+        if rawSamples.count < minSamples { return false }
+        return correlation > envelopeThreshold
     }
 
-    /// Snapshot of current window for visualization (fixed scale).
+    /// Snapshot of current window for visualization (envelope values, fixed scale).
     public var samplePoints: [SamplePoint] {
-        guard let first = samples.first else { return [] }
+        guard let first = envelopeSamples.first else { return [] }
         let baseTime = first.timestamp
-        // Fixed scale: lip 0-3, audio 0-0.05 — no dynamic normalization
-        let lipScale: Float = 3.0
-        let audioScale: Float = 0.05
-        return samples.enumerated().map { i, s in
+        // Fixed scale: lip envelope 0-1.5, audio envelope 0-0.02
+        let lipScale: Float = 1.5
+        let audioScale: Float = 0.02
+        return envelopeSamples.enumerated().map { i, s in
             SamplePoint(
                 id: i,
                 timeOffset: Float(s.timestamp - baseTime),
-                lipActivity: min(s.lipActivity / lipScale, 1.0),
-                audioRMS: min(s.audioRMS / audioScale, 1.0)
+                lipActivity: min(s.lipEnvelope / lipScale, 1.0),
+                audioRMS: min(s.audioEnvelope / audioScale, 1.0)
             )
         }
     }
 
+    // MARK: - Private types
+
+    private struct RawSample {
+        let timestamp: TimeInterval
+        let lipActivity: Float
+        let audioRMS: Float
+    }
+
+    private struct EnvelopeSample {
+        let timestamp: TimeInterval
+        let lipEnvelope: Float
+        let audioEnvelope: Float
+    }
+
     // MARK: - Private state
 
-    private var samples: [Sample] = []
-    private var previousActivity: Float = 0
-    private var recentDeltas: [Float] = []  // rolling window of recent deltas
-    private let windowDuration: TimeInterval = 1.0
-    private let cooccurrenceThreshold: Float = 0.3
-    private let minActiveFrames = 8
-    private let lipDeltaThreshold: Float = 0.03  // single-frame delta
-    private let rollingDeltaThreshold: Float = 0.15  // sum of last 5 deltas (catches sustained open mouth with micro-movements)
-    private let rollingDeltaWindow = 5  // frames to accumulate
-    private let audioThreshold: Float = 0.001
+    private var rawSamples: [RawSample] = []
+    private var envelopeSamples: [EnvelopeSample] = []
+    private let windowDuration: TimeInterval = 1.5  // slightly longer window for envelope
+    private let envelopeThreshold: Float = 0.3
+    private let minSamples = 20  // ~333ms at 60fps
+    // Envelope smoothing: EMA with alpha ~0.15 gives ~6Hz cutoff at 60fps
+    private let emaAlpha: Float = 0.15
+    private var lipEMA: Float = 0
+    private var audioEMA: Float = 0
 
     public init() {}
 
@@ -106,54 +109,59 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        // Detect lip activity: either single-frame delta OR accumulated micro-movements
-        // "哈哈哈" = jaw stays open with tiny vibrations, each delta < 0.03 but sum of 5 > 0.15
-        let delta = abs(activity - previousActivity)
-        previousActivity = activity
+        rawSamples.append(RawSample(timestamp: timestamp, lipActivity: activity, audioRMS: audioRMS))
 
-        recentDeltas.append(delta)
-        if recentDeltas.count > rollingDeltaWindow { recentDeltas.removeFirst() }
-        let rollingDelta = recentDeltas.reduce(0, +)
-
-        let lipOn = delta > lipDeltaThreshold || rollingDelta > rollingDeltaThreshold
-        let audioOn = audioRMS > audioThreshold
-
-        samples.append(Sample(
-            timestamp: timestamp,
-            lipActivity: activity,
-            lipDelta: delta,
-            audioRMS: audioRMS,
-            lipActive: lipOn,
-            audioActive: audioOn
-        ))
-
-        // Trim old samples
+        // Trim old raw samples
         let cutoff = timestamp - windowDuration
-        samples.removeAll { $0.timestamp < cutoff }
+        rawSamples.removeAll { $0.timestamp < cutoff }
 
-        // Recompute co-occurrence
+        // Update exponential moving averages (low-pass filter → envelope)
+        lipEMA = emaAlpha * activity + (1 - emaAlpha) * lipEMA
+        audioEMA = emaAlpha * audioRMS + (1 - emaAlpha) * audioEMA
+
+        envelopeSamples.append(EnvelopeSample(
+            timestamp: timestamp,
+            lipEnvelope: lipEMA,
+            audioEnvelope: audioEMA
+        ))
+        envelopeSamples.removeAll { $0.timestamp < cutoff }
+
+        // Compute Pearson correlation on envelopes
+        guard envelopeSamples.count >= minSamples else {
+            correlation = 0
+            return
+        }
+
+        let lips = envelopeSamples.map(\.lipEnvelope)
+        let audios = envelopeSamples.map(\.audioEnvelope)
+
+        correlation = pearsonCorrelation(xs: lips, ys: audios)
+
+        // Compute debug counts: direction agreement
         var both = 0, lipOnly = 0, audioOnly = 0
-        for s in samples {
-            if s.lipActive && s.audioActive { both += 1 }
-            else if s.lipActive { lipOnly += 1 }
-            else if s.audioActive { audioOnly += 1 }
+        for i in 1..<envelopeSamples.count {
+            let lipRising = envelopeSamples[i].lipEnvelope > envelopeSamples[i-1].lipEnvelope + 0.005
+            let audioRising = envelopeSamples[i].audioEnvelope > envelopeSamples[i-1].audioEnvelope + 0.0001
+            let lipFalling = envelopeSamples[i].lipEnvelope < envelopeSamples[i-1].lipEnvelope - 0.005
+            let audioFalling = envelopeSamples[i].audioEnvelope < envelopeSamples[i-1].audioEnvelope - 0.0001
+
+            let lipMoving = lipRising || lipFalling
+            let audioMoving = audioRising || audioFalling
+
+            if lipMoving && audioMoving { both += 1 }
+            else if lipMoving { lipOnly += 1 }
+            else if audioMoving { audioOnly += 1 }
         }
         bothCount = both
         lipOnlyCount = lipOnly
         audioOnlyCount = audioOnly
-
-        let activeTotal = both + lipOnly + audioOnly
-        if activeTotal >= minActiveFrames {
-            correlation = Float(both) / Float(activeTotal)
-        } else {
-            correlation = 0
-        }
     }
 
     public func reset() {
-        samples.removeAll()
-        previousActivity = 0
-        recentDeltas.removeAll()
+        rawSamples.removeAll()
+        envelopeSamples.removeAll()
+        lipEMA = 0
+        audioEMA = 0
         correlation = 0
         lipActivity = 0
         bothCount = 0
@@ -163,18 +171,42 @@ public class LipAudioCorrelator {
 
     /// Dump current window data for debugging.
     public func dumpWindow() -> String {
-        guard let first = samples.first else { return "(empty)" }
+        guard let first = envelopeSamples.first else { return "(empty)" }
         let baseTime = first.timestamp
-        var lines = ["t_ms,lip,rms,lipOn,audioOn,both"]
-        for s in samples {
+        var lines = ["t_ms,lipEnv,audioEnv"]
+        for s in envelopeSamples {
             let tMs = Int((s.timestamp - baseTime) * 1000)
-            let both = (s.lipActive && s.audioActive) ? 1 : 0
-            lines.append(String(format: "%d,%.3f,%.4f,%d,%d,%d",
-                                tMs, s.lipActivity, s.audioRMS,
-                                s.lipActive ? 1 : 0, s.audioActive ? 1 : 0, both))
+            lines.append(String(format: "%d,%.4f,%.5f", tMs, s.lipEnvelope, s.audioEnvelope))
         }
-        lines.append("# both=\(bothCount) lipOnly=\(lipOnlyCount) audioOnly=\(audioOnlyCount) ratio=\(String(format: "%.2f", correlation))")
+        lines.append("# n=\(envelopeSamples.count) r=\(String(format: "%.3f", correlation)) both=\(bothCount) lipOnly=\(lipOnlyCount) audioOnly=\(audioOnlyCount)")
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Pearson correlation
+
+    private func pearsonCorrelation(xs: [Float], ys: [Float]) -> Float {
+        let n = Float(xs.count)
+        guard n > 1 else { return 0 }
+
+        let meanX = xs.reduce(0, +) / n
+        let meanY = ys.reduce(0, +) / n
+
+        var sumXY: Float = 0
+        var sumX2: Float = 0
+        var sumY2: Float = 0
+
+        for i in 0..<xs.count {
+            let dx = xs[i] - meanX
+            let dy = ys[i] - meanY
+            sumXY += dx * dy
+            sumX2 += dx * dx
+            sumY2 += dy * dy
+        }
+
+        let denom = sqrt(sumX2 * sumY2)
+        guard denom > 1e-8 else { return 0 }
+
+        return sumXY / denom
     }
 }
 #endif
