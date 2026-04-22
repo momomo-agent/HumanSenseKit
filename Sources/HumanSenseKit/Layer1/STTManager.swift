@@ -21,6 +21,12 @@ public class STTManager: NSObject, ObservableObject {
         case sfSpeechRecognizer
     }
 
+    /// Set a closure to capture signal snapshots for debug display on each segment.
+    public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
+        get { builder.captureSignals }
+        set { builder.captureSignals = newValue }
+    }
+
     // --- Sub-components ---
     private let audio = AudioEngineManager()
     private let speech: any SpeechRecognitionBackend

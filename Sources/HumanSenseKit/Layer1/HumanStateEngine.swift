@@ -50,6 +50,23 @@ public class HumanStateEngine {
         // AudioDetectionManager receives buffers from it.
         sttManager.audioDetectionManager = audioManager
 
+        // Wire signal snapshot capture for debug display
+        sttManager.captureSignals = { [weak self] in
+            guard let self else { return SpeechSegment.SignalSnapshot() }
+            let face = self.humanState.face
+            let audio = self.humanState.audio
+            let jawDelta = abs(face.jawOpen - self.previousJawOpen)
+            return SpeechSegment.SignalSnapshot(
+                mouthMoving: jawDelta > 0.04 || face.jawOpen > 0.2,
+                audioActive: audio.isSpeaking,
+                gazeOnScreen: face.isLookingAtScreen,
+                headForward: face.headOrientation.isFacingForward,
+                lipCorrelation: self.lipAudioCorrelator.correlation,
+                lipCorrelated: self.lipAudioCorrelator.isCorrelated,
+                activity: self.humanState.activity.rawValue
+            )
+        }
+
         setupBindings()
     }
 

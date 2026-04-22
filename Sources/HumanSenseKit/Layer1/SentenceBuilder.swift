@@ -26,6 +26,7 @@ public class SentenceBuilder {
         var startedLookingAtScreen: Bool
         var gazeSpans: [GazeSpan]
         var isFromUser: Bool
+        var signals: SpeechSegment.SignalSnapshot
     }
 
     // MARK: - State
@@ -39,6 +40,8 @@ public class SentenceBuilder {
     // External inputs
     var isLookingAtScreen: Bool = false
     var isSpeaking: Bool = false
+    /// Closure to capture current signal snapshot for debug display
+    var captureSignals: (() -> SpeechSegment.SignalSnapshot)?
 
     // MARK: - Public API
 
@@ -52,12 +55,14 @@ public class SentenceBuilder {
 
         if activeSentence == nil {
             // Start a new sentence
+            let snap = captureSignals?() ?? SpeechSegment.SignalSnapshot()
             activeSentence = Sentence(
                 text: text,
                 isFinal: false,
                 startedLookingAtScreen: isLookingAtScreen,
                 gazeSpans: isLookingAtScreen ? [GazeSpan(charCount: newCharCount, isToScreen: true)] : [],
-                isFromUser: isSpeaking  // Only mark as user speech if lip-audio correlated
+                isFromUser: isSpeaking,
+                signals: snap
             )
             lastCharCount = newCharCount
             speechStartCaptured = true
@@ -67,6 +72,7 @@ public class SentenceBuilder {
 
             // Sync isFromUser with current isSpeaking state
             activeSentence?.isFromUser = isSpeaking
+            activeSentence?.signals = captureSignals?() ?? SpeechSegment.SignalSnapshot()
 
             if addedChars > 0, activeSentence?.startedLookingAtScreen == true {
                 updateGazeSpans(addedChars: addedChars)
@@ -137,7 +143,7 @@ public class SentenceBuilder {
             result.append(SpeechSegment(
                 text: " ", isToScreen: false,
                 sentenceStartedLookingAtScreen: s.startedLookingAtScreen,
-                isFromUser: s.isFromUser, isFinal: s.isFinal
+                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
             ))
         }
 
@@ -145,7 +151,7 @@ public class SentenceBuilder {
             result.append(SpeechSegment(
                 id: s.id, text: s.text, isToScreen: false,
                 sentenceStartedLookingAtScreen: false,
-                isFromUser: s.isFromUser, isFinal: s.isFinal
+                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
             ))
         } else {
             var offset = s.text.startIndex
@@ -157,7 +163,7 @@ public class SentenceBuilder {
                         id: i == 0 ? s.id : span.id,
                         text: spanText, isToScreen: span.isToScreen,
                         sentenceStartedLookingAtScreen: true,
-                        isFromUser: s.isFromUser, isFinal: s.isFinal
+                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
                     ))
                 }
                 offset = end
@@ -169,7 +175,7 @@ public class SentenceBuilder {
                         text: remaining,
                         isToScreen: s.gazeSpans.last?.isToScreen ?? true,
                         sentenceStartedLookingAtScreen: true,
-                        isFromUser: s.isFromUser, isFinal: s.isFinal
+                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
                     ))
                 }
             }
