@@ -19,7 +19,8 @@ public class LipAudioCorrelator {
 
     private struct Sample {
         let timestamp: TimeInterval
-        let lipActivity: Float
+        let lipActivity: Float      // absolute value for visualization
+        let lipDelta: Float          // frame-to-frame change for detection
         let audioRMS: Float
         let lipActive: Bool
         let audioActive: Bool
@@ -77,10 +78,11 @@ public class LipAudioCorrelator {
     // MARK: - Private state
 
     private var samples: [Sample] = []
+    private var previousActivity: Float = 0
     private let windowDuration: TimeInterval = 1.0
     private let cooccurrenceThreshold: Float = 0.4  // 40% of active frames must be both
     private let minActiveFrames = 8  // need at least ~130ms of activity
-    private let lipThreshold: Float = 0.3  // lip activity above this = "lip is moving"
+    private let lipDeltaThreshold: Float = 0.05  // lip must CHANGE by this much frame-to-frame
     private let audioThreshold: Float = 0.001  // audio RMS above this = "sound present"
 
     public init() {}
@@ -97,12 +99,17 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        let lipOn = activity > lipThreshold
+        // Detect lip MOVEMENT (change), not just position
+        let delta = abs(activity - previousActivity)
+        previousActivity = activity
+
+        let lipOn = delta > lipDeltaThreshold
         let audioOn = audioRMS > audioThreshold
 
         samples.append(Sample(
             timestamp: timestamp,
             lipActivity: activity,
+            lipDelta: delta,
             audioRMS: audioRMS,
             lipActive: lipOn,
             audioActive: audioOn
@@ -133,6 +140,7 @@ public class LipAudioCorrelator {
 
     public func reset() {
         samples.removeAll()
+        previousActivity = 0
         correlation = 0
         lipActivity = 0
         bothCount = 0
