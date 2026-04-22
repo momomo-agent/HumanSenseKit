@@ -107,7 +107,9 @@ public class SentenceBuilder {
         var result: [SpeechSegment] = []
 
         for s in sentences { appendSentence(s, to: &result) }
-        if let active = activeSentence, !active.text.isEmpty {
+        if var active = activeSentence, !active.text.isEmpty {
+            // Active sentence always reflects current isSpeaking state
+            active.isFromUser = isSpeaking
             appendSentence(active, to: &result)
         }
 
@@ -117,10 +119,12 @@ public class SentenceBuilder {
     // MARK: - Private: Sentence Lifecycle
 
     private func finalizeActiveSentence() {
-        guard let active = activeSentence, !active.text.isEmpty else {
+        guard var active = activeSentence, !active.text.isEmpty else {
             activeSentence = nil
             return
         }
+        // Stamp final isSpeaking state
+        active.isFromUser = isSpeaking
         sentences.append(active)
         if sentences.count > maxSentences { sentences.removeFirst() }
         activeSentence = nil

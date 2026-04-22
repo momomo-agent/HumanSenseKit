@@ -185,6 +185,12 @@ public class HumanStateEngine {
             return toScreen ? .speakingToScreen : .speakingToOther
         }
 
+        // Not speaking: check if audio is active but mouth not moving = ambient
+        if audio.isSpeaking && !mouthMoving {
+            if !face.isLookingAtScreen { return .distracted }
+            return .listening
+        }
+
         if !face.isLookingAtScreen { return .distracted }
         return .listening
     }
