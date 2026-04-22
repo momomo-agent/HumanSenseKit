@@ -57,7 +57,7 @@ public class HumanStateEngine {
             let audio = self.humanState.audio
             let jawDelta = abs(face.jawOpen - self.previousJawOpen)
             return SpeechSegment.SignalSnapshot(
-                mouthMoving: jawDelta > 0.02 || face.jawOpen > 0.15,
+                mouthMoving: jawDelta > 0.02 || face.jawOpen > 0.15 || self.lipAudioCorrelator.lipActivity > 0.5,
                 audioActive: audio.isSpeaking,
                 gazeOnScreen: face.isLookingAtScreen,
                 headForward: face.headOrientation.isFacingForward,
@@ -185,9 +185,8 @@ public class HumanStateEngine {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15
-
-        // Feed lip-audio correlator every frame with all lip blendshapes
+        // Use composite lip activity from correlator for mouthMoving detection
+        // This captures all mouth movements (not just jaw), more robust for speech
         let lipFrame = LipAudioCorrelator.LipFrame(
             jawOpen: face.jawOpen,
             mouthClose: face.mouthClose,
@@ -199,6 +198,10 @@ public class HumanStateEngine {
             mouthStretchRight: face.mouthStretchRight
         )
         lipAudioCorrelator.addSample(face: lipFrame, audioRMS: audio.volume)
+
+        // mouthMoving: either jaw delta OR composite lip activity above threshold
+        // lipActivity is weighted sum of all lip blendshapes (~0 at rest, ~1-3 during speech)
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15 || lipAudioCorrelator.lipActivity > 0.5
 
         if mouthMoving && audio.isSpeaking {
             // Only count as real speech if lip movement correlates with audio
