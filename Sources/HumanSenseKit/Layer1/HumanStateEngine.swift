@@ -168,7 +168,7 @@ public class HumanStateEngine {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.2
+        let mouthMoving = jawDelta > 0.04 || face.jawOpen > 0.2
 
         // Feed lip-audio correlator every frame
         lipAudioCorrelator.addSample(jawDelta: jawDelta, audioRMS: audio.volume)

@@ -48,7 +48,7 @@ public class SentenceBuilder {
         let newCharCount = text.count
         let addedChars = max(0, newCharCount - lastCharCount)
 
-        print("[SentenceBuilder] handleResult: '\(text.prefix(40))' isFinal=\(isFinal) chars=\(newCharCount)")
+        print("[SentenceBuilder] handleResult: '\(text.prefix(40))' isFinal=\(isFinal) chars=\(newCharCount) isSpeaking=\(isSpeaking)")
 
         if activeSentence == nil {
             // Start a new sentence
