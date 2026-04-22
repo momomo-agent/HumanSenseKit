@@ -95,9 +95,12 @@ public class LipAudioCorrelator {
     // MARK: - Configuration
 
     private let windowDuration: TimeInterval = 1.5
-    private let correlationThreshold: Float = 0.4
+    private let correlationThreshold: Float = 0.3  // co-occurrence ratio threshold
     private let minSamples = 30  // ~500ms at 60fps
     private let subWindowSize = 10  // ~167ms rolling std window
+    // Thresholds for "active" in rolling std
+    private let lipStdThreshold: Float = 0.02  // lip std above this = mouth is moving
+    private let audioStdThreshold: Float = 0.001  // audio std above this = sound present
 
     // Baseline tracking
     private let baselineAlpha: Float = 0.005
@@ -156,27 +159,31 @@ public class LipAudioCorrelator {
         let lipStds = envs.map(\.lipStd)
         let audioStds = envs.map(\.audioStd)
 
-        correlation = pearsonCorrelation(xs: lipStds, ys: audioStds)
+        // Co-occurrence: what fraction of frames have both lip AND audio active?
+        var both = 0, lipOnly = 0, audioOnly = 0, neither = 0
+        for i in 0..<envs.count {
+            let lipActive = lipStds[i] > lipStdThreshold
+            let audioActive = audioStds[i] > audioStdThreshold
+            if lipActive && audioActive { both += 1 }
+            else if lipActive { lipOnly += 1 }
+            else if audioActive { audioOnly += 1 }
+            else { neither += 1 }
+        }
+        bothCount = both
+        lipOnlyCount = lipOnly
+        audioOnlyCount = audioOnly
 
-        // Lip variance
+        let totalActive = both + lipOnly + audioOnly
+        if totalActive > 0 {
+            correlation = Float(both) / Float(totalActive)
+        } else {
+            correlation = 0
+        }
+
+        // Lip variance (for gate)
         let n = Float(lipStds.count)
         let meanLip = lipStds.reduce(0, +) / n
         lipVariance = lipStds.reduce(0) { $0 + ($1 - meanLip) * ($1 - meanLip) } / n
-
-        // Debug counts
-        var both = 0, lipOnly = 0, audioOnly = 0
-        for i in 1..<envs.count {
-            let lipUp = envs[i].lipStd > envs[i-1].lipStd + 0.001
-            let audioUp = envs[i].audioStd > envs[i-1].audioStd + 0.0001
-            let lipDown = envs[i].lipStd < envs[i-1].lipStd - 0.001
-            let audioDown = envs[i].audioStd < envs[i-1].audioStd - 0.0001
-            let lipMoving = lipUp || lipDown
-            let audioMoving = audioUp || audioDown
-            if lipMoving && audioMoving { both += 1 }
-            else if lipMoving { lipOnly += 1 }
-            else if audioMoving { audioOnly += 1 }
-        }
-        bothCount = both
         lipOnlyCount = lipOnly
         audioOnlyCount = audioOnly
     }
