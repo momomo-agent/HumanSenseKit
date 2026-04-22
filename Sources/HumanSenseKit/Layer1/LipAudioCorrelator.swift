@@ -80,9 +80,9 @@ public class LipAudioCorrelator {
     private var samples: [Sample] = []
     private var previousActivity: Float = 0
     private let windowDuration: TimeInterval = 1.0
-    private let cooccurrenceThreshold: Float = 0.4  // 40% of active frames must be both
+    private let cooccurrenceThreshold: Float = 0.3  // 30% of active frames must be both
     private let minActiveFrames = 8  // need at least ~130ms of activity
-    private let lipDeltaThreshold: Float = 0.05  // lip must CHANGE by this much frame-to-frame
+    private let lipDeltaThreshold: Float = 0.03  // lip must CHANGE by this much frame-to-frame
     private let audioThreshold: Float = 0.001  // audio RMS above this = "sound present"
 
     public init() {}
