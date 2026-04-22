@@ -53,8 +53,12 @@ public class LipAudioCorrelator {
     /// Whether the user is speaking (lip + audio co-occurring).
     public var isCorrelated: Bool {
         let activeFrames = bothCount + lipOnlyCount + audioOnlyCount
-        // Not enough data — default to false (conservative: don't claim user is speaking)
+        // Not enough activity data
         if activeFrames < minActiveFrames { return false }
+        // Primary check: enough frames where both lip AND audio are active
+        // "哈哈哈" = ~0.3s = ~18 frames, need at least 5 both frames
+        if bothCount >= 5 { return true }
+        // Fallback: ratio check for longer utterances
         return correlation > cooccurrenceThreshold
     }
 
