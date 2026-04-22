@@ -63,7 +63,9 @@ public class HumanStateEngine {
                 headForward: face.headOrientation.isFacingForward,
                 lipCorrelation: self.lipAudioCorrelator.correlation,
                 lipCorrelated: self.lipAudioCorrelator.isCorrelated,
-                activity: self.humanState.activity.rawValue
+                activity: self.humanState.activity.rawValue,
+                bestOffset: self.lipAudioCorrelator.bestOffset,
+                waveform: self.lipAudioCorrelator.samplePoints
             )
         }
 

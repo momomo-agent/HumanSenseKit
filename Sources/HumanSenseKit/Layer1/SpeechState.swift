@@ -20,9 +20,15 @@ public struct SpeechSegment: Identifiable {
         public let lipCorrelation: Float
         public let lipCorrelated: Bool
         public let activity: String
+        /// Best cross-correlation offset in frames
+        public let bestOffset: Int
+        /// Waveform snapshot at the time of segment creation
+        public let waveform: [LipAudioCorrelator.SamplePoint]
 
         public init(mouthMoving: Bool = false, audioActive: Bool = false, gazeOnScreen: Bool = false,
-                    headForward: Bool = false, lipCorrelation: Float = 0, lipCorrelated: Bool = false, activity: String = "") {
+                    headForward: Bool = false, lipCorrelation: Float = 0, lipCorrelated: Bool = false,
+                    activity: String = "", bestOffset: Int = 0,
+                    waveform: [LipAudioCorrelator.SamplePoint] = []) {
             self.mouthMoving = mouthMoving
             self.audioActive = audioActive
             self.gazeOnScreen = gazeOnScreen
@@ -30,6 +36,8 @@ public struct SpeechSegment: Identifiable {
             self.lipCorrelation = lipCorrelation
             self.lipCorrelated = lipCorrelated
             self.activity = activity
+            self.bestOffset = bestOffset
+            self.waveform = waveform
         }
     }
     public let signals: SignalSnapshot
