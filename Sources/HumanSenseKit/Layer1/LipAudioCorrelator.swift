@@ -44,6 +44,12 @@ public class LipAudioCorrelator {
     /// Returns true when not enough data yet (benefit of the doubt).
     public var isCorrelated: Bool {
         if samples.count < minSamples { return true }
+        // Lip must actually be moving — if lip variance is too low,
+        // any r value is meaningless (flat line correlates with anything)
+        let lipValues = samples.map(\.lipActivity)
+        let meanLip = lipValues.reduce(0, +) / Float(lipValues.count)
+        let lipVariance = lipValues.reduce(0.0) { $0 + ($1 - meanLip) * ($1 - meanLip) } / Float(lipValues.count)
+        if lipVariance < 0.01 { return false }  // lip barely moved
         return correlation > correlationThreshold
     }
 
@@ -70,10 +76,10 @@ public class LipAudioCorrelator {
     private let windowDuration: TimeInterval = 1.0
     private let correlationThreshold: Float = 0.15
     private let minSamples = 15  // ~250ms at 60fps
-    // Cross-correlation search range: -2 to +10 frames (~-33ms to +167ms)
-    // Negative = audio leads lip (unlikely), positive = lip leads audio (expected)
-    private let minLag = -2
-    private let maxLag = 10
+    // Cross-correlation search range: -1 to +4 frames (~-17ms to +67ms)
+    // Kept tight to avoid overfitting on noise
+    private let minLag = -1
+    private let maxLag = 4
 
     public init() {}
 
