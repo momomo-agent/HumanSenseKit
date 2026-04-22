@@ -57,20 +57,19 @@ public class LipAudioCorrelator {
         return correlation > cooccurrenceThreshold
     }
 
-    /// Snapshot of current window for visualization (normalized 0-1).
+    /// Snapshot of current window for visualization (fixed scale).
     public var samplePoints: [SamplePoint] {
         guard let first = samples.first else { return [] }
         let baseTime = first.timestamp
-        let maxLip = samples.map(\.lipActivity).max() ?? 1
-        let maxRMS = samples.map(\.audioRMS).max() ?? 1
-        let normLip = maxLip > 0.001 ? maxLip : 1
-        let normRMS = maxRMS > 0.0001 ? maxRMS : 1
+        // Fixed scale: lip 0-3, audio 0-0.05 — no dynamic normalization
+        let lipScale: Float = 3.0
+        let audioScale: Float = 0.05
         return samples.enumerated().map { i, s in
             SamplePoint(
                 id: i,
                 timeOffset: Float(s.timestamp - baseTime),
-                lipActivity: s.lipActivity / normLip,
-                audioRMS: s.audioRMS / normRMS
+                lipActivity: min(s.lipActivity / lipScale, 1.0),
+                audioRMS: min(s.audioRMS / audioScale, 1.0)
             )
         }
     }
