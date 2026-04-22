@@ -70,9 +70,7 @@ public class SentenceBuilder {
             // Update existing sentence
             activeSentence?.text = text
 
-            // Sync isFromUser with current isSpeaking state
-            activeSentence?.isFromUser = isSpeaking
-            activeSentence?.signals = captureSignals?() ?? SpeechSegment.SignalSnapshot()
+            // isFromUser and signals are locked at sentence creation — don't update mid-sentence
 
             if addedChars > 0, activeSentence?.startedLookingAtScreen == true {
                 updateGazeSpans(addedChars: addedChars)
@@ -113,9 +111,7 @@ public class SentenceBuilder {
         var result: [SpeechSegment] = []
 
         for s in sentences { appendSentence(s, to: &result) }
-        if var active = activeSentence, !active.text.isEmpty {
-            // Active sentence always reflects current isSpeaking state
-            active.isFromUser = isSpeaking
+        if let active = activeSentence, !active.text.isEmpty {
             appendSentence(active, to: &result)
         }
 
@@ -125,12 +121,10 @@ public class SentenceBuilder {
     // MARK: - Private: Sentence Lifecycle
 
     private func finalizeActiveSentence() {
-        guard var active = activeSentence, !active.text.isEmpty else {
+        guard let active = activeSentence, !active.text.isEmpty else {
             activeSentence = nil
             return
         }
-        // Stamp final isSpeaking state
-        active.isFromUser = isSpeaking
         sentences.append(active)
         if sentences.count > maxSentences { sentences.removeFirst() }
         activeSentence = nil
