@@ -46,20 +46,16 @@ public class LipAudioCorrelator {
 
     /// Add a new sample every ARKit frame (~60fps).
     public func addSample(face: LipFrame, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        // Compute lip activity = sum of absolute deltas across all blendshapes
-        let activity: Float
-        if let prev = previousFrame {
-            activity = abs(face.jawOpen - prev.jawOpen)
-                     + abs(face.mouthClose - prev.mouthClose)
-                     + abs(face.mouthFunnel - prev.mouthFunnel)
-                     + abs(face.mouthPucker - prev.mouthPucker)
-                     + abs(face.mouthLeft - prev.mouthLeft)
-                     + abs(face.mouthRight - prev.mouthRight)
-                     + abs(face.mouthStretchLeft - prev.mouthStretchLeft)
-                     + abs(face.mouthStretchRight - prev.mouthStretchRight)
-        } else {
-            activity = 0
-        }
+        // Compute lip activity = weighted sum of absolute blendshape values
+        // Speech opens the mouth in various ways — the total "openness" correlates with volume
+        let activity = face.jawOpen * 2.0  // jaw is the strongest signal
+                     + face.mouthFunnel
+                     + face.mouthPucker
+                     + face.mouthLeft
+                     + face.mouthRight
+                     + face.mouthStretchLeft
+                     + face.mouthStretchRight
+                     + (1.0 - face.mouthClose)  // mouthClose=1 means lips sealed, invert it
         previousFrame = face
         lipActivity = activity
 
