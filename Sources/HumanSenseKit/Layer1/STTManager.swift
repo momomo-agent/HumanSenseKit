@@ -21,6 +21,10 @@ public class STTManager: NSObject, ObservableObject {
         case sfSpeechRecognizer
     }
 
+    /// Apple's ML-based voice activity detection.
+    /// True when SpeechDetector detects speech in the audio stream.
+    @Published public var speechDetected: Bool = false
+
     /// Called when a sentence is finalized — for debug logging.
     public var onSentenceFinalized: ((_ text: String) -> Void)?
 
@@ -140,6 +144,13 @@ public class STTManager: NSObject, ObservableObject {
                 self.builder.resetActive()
             }
             self.rebuildSegments()
+        }
+
+        // SpeechDetector VAD callback (only available with SpeechAnalyzer backend)
+        if let analyzerBackend = speech as? SpeechAnalyzerBackend {
+            analyzerBackend.onSpeechDetected = { [weak self] detected in
+                self?.speechDetected = detected
+            }
         }
 
         speech.onError = { [weak self] error in

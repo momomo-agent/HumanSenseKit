@@ -208,9 +208,11 @@ public class HumanStateEngine {
         )
         lipAudioCorrelator.addSample(face: lipFrame, audioRMS: audio.volume)
 
-        // Speech detection: audio active + lip-audio correlation passes
-        // No mouthMoving gate — correlation already captures whether lips move with audio
-        if audio.isSpeaking && lipAudioCorrelator.isCorrelated {
+        // Speech detection: use Apple's SpeechDetector (ML-based VAD) when available,
+        // fall back to audio.isSpeaking (RMS threshold).
+        // Combined with lip-audio correlation for "is it THIS person speaking?"
+        let voiceActive = sttManager.speechDetected || audio.isSpeaking
+        if voiceActive && lipAudioCorrelator.isCorrelated {
             let headForward = face.headOrientation.isFacingForward
             let toScreen = face.isLookingAtScreen && headForward
             return toScreen ? .speakingToScreen : .speakingToOther

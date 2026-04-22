@@ -11,10 +11,19 @@ import AVFoundation
 final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
+    private var detector: SpeechDetector?
     private var resultTask: Task<Void, Never>?
+    private var detectorTask: Task<Void, Never>?
     private var analyzerTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
     private var generation: Int = 0
+
+    /// Apple's ML-based voice activity detection result.
+    /// Updated in real-time by SpeechDetector.
+    private(set) var speechDetected: Bool = false
+
+    /// Callback when speechDetected changes.
+    var onSpeechDetected: ((Bool) -> Void)?
 
     // nonisolated(unsafe) — written on MainActor, read from audio thread
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
@@ -64,11 +73,17 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
         )
         self.transcriber = transcriber
 
+        let detector = SpeechDetector(
+            detectionOptions: .init(sensitivityLevel: .high),
+            reportResults: true
+        )
+        self.detector = detector
+
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         // Open immediately — AsyncStream buffers until analyzer starts consuming
         self.inputContinuation = continuation
 
-        // Consume results on background thread — MainActor is busy with ARKit 60fps
+        // Consume transcription results on background thread
         resultTask = Task.detached { [weak self] in
             do {
                 for try await result in transcriber.results {
@@ -90,6 +105,24 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             }
         }
 
+        // Consume SpeechDetector results (VAD)
+        detectorTask = Task.detached { [weak self] in
+            do {
+                for try await result in detector.results {
+                    await MainActor.run {
+                        guard let self, self.generation == myGeneration else { return }
+                        if self.speechDetected != result.speechDetected {
+                            self.speechDetected = result.speechDetected
+                            self.onSpeechDetected?(result.speechDetected)
+                        }
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("[Speech] SpeechDetector error gen=\(myGeneration): \(error.localizedDescription)")
+            }
+        }
+
         // Start analyzer — get format and start ASAP to minimize latency
         let pendingCleanup = cleanupTask
         analyzerTask = Task.detached { [weak self] in
@@ -98,10 +131,10 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             guard gen == myGeneration else { return }
             do {
                 // Get optimal format and create analyzer in quick succession
-                let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+                let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber, detector])
                 guard await self?.generation == myGeneration else { return }
 
-                let analyzer = SpeechAnalyzer(modules: [transcriber])
+                let analyzer = SpeechAnalyzer(modules: [transcriber, detector])
                 await MainActor.run {
                     self?.analyzerFormat = format
                     self?.analyzer = analyzer
@@ -127,12 +160,16 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
 
         resultTask?.cancel()
         resultTask = nil
+        detectorTask?.cancel()
+        detectorTask = nil
         analyzerTask?.cancel()
         analyzerTask = nil
         inputContinuation = nil
         analyzer = nil
         transcriber = nil
+        detector = nil
         analyzerFormat = nil
+        speechDetected = false
 
         oldContinuation?.finish()
 
