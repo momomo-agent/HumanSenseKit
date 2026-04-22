@@ -189,8 +189,9 @@ extension FaceTrackingManager: ARSessionDelegate {
             let gazeY = self.gazeFilterY?.value ?? adjustedY
             let gazeInScreen = gazeX > marginX && gazeX < screenSize.width - marginX &&
                               gazeY > marginY && gazeY < screenSize.height - marginY
-            // Head pose check: pitch -40°..20°, yaw ±30° (from attention-demo)
-            let headPoseValid = (-0.7...0.35).contains(pitch) && (-0.52...0.52).contains(yaw)
+            // Head pose check: pitch -40°..50°, yaw ±30°
+            // Upper pitch raised from 0.35 to 0.87 (~50°) to support lying-down posture
+            let headPoseValid = (-0.7...0.87).contains(pitch) && (-0.52...0.52).contains(yaw)
             newState.isLookingAtScreen = gazeInScreen && headPoseValid
 
             newState.jawOpen = jawOpen
