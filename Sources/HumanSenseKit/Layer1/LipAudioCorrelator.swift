@@ -46,9 +46,15 @@ public class LipAudioCorrelator {
     public private(set) var lipOnlyCount: Int = 0  // lip envelope rising, audio flat
     public private(set) var audioOnlyCount: Int = 0 // audio envelope rising, lip flat
 
+    /// Lip envelope variance (for debug display)
+    public private(set) var lipVariance: Float = 0
+
     /// Whether the user is speaking.
     public var isCorrelated: Bool {
         if rawSamples.count < minSamples { return false }
+        // If lip envelope barely moved, it's not the user speaking
+        // (micro-jitter in blendshapes can spuriously correlate with audio)
+        if lipVariance < 0.0001 { return false }
         return correlation > envelopeThreshold
     }
 
@@ -152,6 +158,11 @@ public class LipAudioCorrelator {
 
         correlation = pearsonCorrelation(xs: lips, ys: audios)
 
+        // Compute lip envelope variance
+        let n = Float(lips.count)
+        let meanLip = lips.reduce(0, +) / n
+        lipVariance = lips.reduce(0) { $0 + ($1 - meanLip) * ($1 - meanLip) } / n
+
         // Compute debug counts: direction agreement
         var both = 0, lipOnly = 0, audioOnly = 0
         for i in 1..<envelopeSamples.count {
@@ -181,6 +192,7 @@ public class LipAudioCorrelator {
         baselineInitialized = false
         correlation = 0
         lipActivity = 0
+        lipVariance = 0
         bothCount = 0
         lipOnlyCount = 0
         audioOnlyCount = 0
@@ -195,7 +207,7 @@ public class LipAudioCorrelator {
             let tMs = Int((s.timestamp - baseTime) * 1000)
             lines.append(String(format: "%d,%.4f,%.5f", tMs, s.lipEnvelope, s.audioEnvelope))
         }
-        lines.append("# n=\(envelopeSamples.count) r=\(String(format: "%.3f", correlation)) both=\(bothCount) lipOnly=\(lipOnlyCount) audioOnly=\(audioOnlyCount)")
+        lines.append("# n=\(envelopeSamples.count) r=\(String(format: "%.3f", correlation)) lipVar=\(String(format: "%.6f", lipVariance)) both=\(bothCount) lipOnly=\(lipOnlyCount) audioOnly=\(audioOnlyCount)")
         return lines.joined(separator: "\n")
     }
 
