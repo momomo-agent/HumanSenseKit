@@ -185,8 +185,7 @@ public class HumanStateEngine {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        // Use composite lip activity from correlator for mouthMoving detection
-        // This captures all mouth movements (not just jaw), more robust for speech
+        // Feed lip-audio correlator every frame with all lip blendshapes
         let lipFrame = LipAudioCorrelator.LipFrame(
             jawOpen: face.jawOpen,
             mouthClose: face.mouthClose,
@@ -199,26 +198,12 @@ public class HumanStateEngine {
         )
         lipAudioCorrelator.addSample(face: lipFrame, audioRMS: audio.volume)
 
-        // mouthMoving: either jaw delta OR composite lip activity above threshold
-        // lipActivity is weighted sum of all lip blendshapes (~0 at rest, ~1-3 during speech)
-        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15 || lipAudioCorrelator.lipActivity > 0.5
-
-        if mouthMoving && audio.isSpeaking {
-            // Only count as real speech if lip movement correlates with audio
-            guard lipAudioCorrelator.isCorrelated else {
-                // Mouth moving + sound but not correlated = ambient noise
-                if !face.isLookingAtScreen { return .distracted }
-                return .listening
-            }
+        // Speech detection: audio active + lip-audio correlation passes
+        // No mouthMoving gate — correlation already captures whether lips move with audio
+        if audio.isSpeaking && lipAudioCorrelator.isCorrelated {
             let headForward = face.headOrientation.isFacingForward
             let toScreen = face.isLookingAtScreen && headForward
             return toScreen ? .speakingToScreen : .speakingToOther
-        }
-
-        // Not speaking: check if audio is active but mouth not moving = ambient
-        if audio.isSpeaking && !mouthMoving {
-            if !face.isLookingAtScreen { return .distracted }
-            return .listening
         }
 
         if !face.isLookingAtScreen { return .distracted }
