@@ -23,6 +23,14 @@ public class LipAudioCorrelator {
         let audioRMS: Float
     }
 
+    /// Public snapshot of samples for visualization
+    public struct SamplePoint: Identifiable {
+        public let id: Int
+        public let timeOffset: Float  // seconds from window start
+        public let lipActivity: Float
+        public let audioRMS: Float
+    }
+
     /// Rolling correlation coefficient [-1, 1].
     public private(set) var correlation: Float = 0
 
@@ -34,6 +42,25 @@ public class LipAudioCorrelator {
     public var isCorrelated: Bool {
         if samples.count < minSamples { return true }
         return correlation > correlationThreshold
+    }
+
+    /// Snapshot of current window for visualization (normalized 0-1).
+    public var samplePoints: [SamplePoint] {
+        guard let first = samples.first else { return [] }
+        let baseTime = first.timestamp
+        // Find max values for normalization
+        let maxLip = samples.map(\.lipActivity).max() ?? 1
+        let maxRMS = samples.map(\.audioRMS).max() ?? 1
+        let normLip = maxLip > 0.001 ? maxLip : 1
+        let normRMS = maxRMS > 0.0001 ? maxRMS : 1
+        return samples.enumerated().map { i, s in
+            SamplePoint(
+                id: i,
+                timeOffset: Float(s.timestamp - baseTime),
+                lipActivity: s.lipActivity / normLip,
+                audioRMS: s.audioRMS / normRMS
+            )
+        }
     }
 
     private var samples: [Sample] = []
