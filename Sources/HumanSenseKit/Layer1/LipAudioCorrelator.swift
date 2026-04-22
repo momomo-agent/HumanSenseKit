@@ -88,7 +88,7 @@ public class LipAudioCorrelator {
     private var rawSamples: [RawSample] = []
     private var envelopeSamples: [EnvelopeSample] = []
     private let windowDuration: TimeInterval = 1.5  // slightly longer window for envelope
-    private let envelopeThreshold: Float = 0.3
+    private let envelopeThreshold: Float = 0.45
     private let minSamples = 20  // ~333ms at 60fps
     // Envelope smoothing: EMA with alpha ~0.15 gives ~6Hz cutoff at 60fps
     private let emaAlpha: Float = 0.15
