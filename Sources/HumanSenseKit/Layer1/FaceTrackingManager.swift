@@ -189,16 +189,24 @@ extension FaceTrackingManager: ARSessionDelegate {
             let gazeY = self.gazeFilterY?.value ?? adjustedY
             let gazeInScreen = gazeX > marginX && gazeX < screenSize.width - marginX &&
                               gazeY > marginY && gazeY < screenSize.height - marginY
-            // Head pose check: yaw ±30° (pitch unconstrained — lying down can reach 0.7+)
+            // Head pose: yaw ±30°, pitch -40°..25° for normal posture
             let headForward = (-0.52...0.52).contains(yaw)
-            // BlendShape-based gaze: eyes looking roughly center (not far left/right/up/down)
-            // gazeH/gazeV are derived from eyeLookIn/Out/Up/Down blendShapes
-            let bsGazeH = abs(newState.gazeH)
-            let bsGazeV = abs(newState.gazeV)
-            let eyesLookingCenter = bsGazeH < 0.35 && bsGazeV < 0.4
-            // Primary: projection-based gaze in screen bounds
-            // Fallback: head forward + eyes looking center (handles lying-down posture)
-            newState.isLookingAtScreen = headForward && (gazeInScreen || eyesLookingCenter)
+            let normalPosture = (-0.7...0.45).contains(pitch)
+            
+            if normalPosture {
+                // Normal posture: trust ARKit gaze projection
+                let headPoseValid = headForward && normalPosture
+                newState.isLookingAtScreen = gazeInScreen && headPoseValid
+            } else if headForward {
+                // Lying down (pitch > 0.45): ARKit projection unreliable,
+                // use blendShape gaze with tighter thresholds
+                let bsGazeH = abs(newState.gazeH)
+                let bsGazeV = abs(newState.gazeV)
+                let eyesLookingForward = bsGazeH < 0.15 && bsGazeV < 0.2
+                newState.isLookingAtScreen = eyesLookingForward
+            } else {
+                newState.isLookingAtScreen = false
+            }
 
             newState.jawOpen = jawOpen
             newState.mouthClose = mouthClose
