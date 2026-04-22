@@ -185,10 +185,11 @@ public class HumanStateEngine {
         if face.eyesClosed { return .eyesClosed }
 
         let jawDelta = abs(face.jawOpen - previousJawOpen)
-        let mouthMoving = jawDelta > 0.04 || face.jawOpen > 0.2
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15
 
-        // Feed lip-audio correlator every frame
-        lipAudioCorrelator.addSample(jawDelta: jawDelta, audioRMS: audio.volume)
+        // Feed lip-audio correlator every frame — use jawOpen (absolute) not jawDelta
+        // jawOpen correlates better with speech volume than frame-to-frame delta
+        lipAudioCorrelator.addSample(jawDelta: face.jawOpen, audioRMS: audio.volume)
 
         if mouthMoving && audio.isSpeaking {
             // Only count as real speech if lip movement correlates with audio
