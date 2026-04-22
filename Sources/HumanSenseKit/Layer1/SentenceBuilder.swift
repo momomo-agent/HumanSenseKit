@@ -57,13 +57,18 @@ public class SentenceBuilder {
                 isFinal: false,
                 startedLookingAtScreen: isLookingAtScreen,
                 gazeSpans: isLookingAtScreen ? [GazeSpan(charCount: newCharCount, isToScreen: true)] : [],
-                isFromUser: true  // If we're getting text, someone is speaking
+                isFromUser: isSpeaking  // Only mark as user speech if lip-audio correlated
             )
             lastCharCount = newCharCount
             speechStartCaptured = true
         } else {
             // Update existing sentence
             activeSentence?.text = text
+
+            // If user starts speaking mid-sentence, upgrade to user speech
+            if isSpeaking && activeSentence?.isFromUser == false {
+                activeSentence?.isFromUser = true
+            }
 
             if addedChars > 0, activeSentence?.startedLookingAtScreen == true {
                 updateGazeSpans(addedChars: addedChars)
