@@ -27,6 +27,7 @@ public class HumanStateEngine {
     public let handManager: HandGestureManager
     public let deviceMotionManager: DeviceMotionManager
     public let sttManager: STTManager
+    public let lipAudioCorrelator = LipAudioCorrelator()
 
     private var cancellables = Set<AnyCancellable>()
     private var pendingActivity: HumanActivity?
@@ -169,7 +170,16 @@ public class HumanStateEngine {
         let jawDelta = abs(face.jawOpen - previousJawOpen)
         let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.2
 
+        // Feed lip-audio correlator every frame
+        lipAudioCorrelator.addSample(jawDelta: jawDelta, audioRMS: audio.volume)
+
         if mouthMoving && audio.isSpeaking {
+            // Only count as real speech if lip movement correlates with audio
+            guard lipAudioCorrelator.isCorrelated else {
+                // Mouth moving + sound but not correlated = ambient noise
+                if !face.isLookingAtScreen { return .distracted }
+                return .listening
+            }
             let headForward = face.headOrientation.isFacingForward
             let toScreen = face.isLookingAtScreen && headForward
             return toScreen ? .speakingToScreen : .speakingToOther
