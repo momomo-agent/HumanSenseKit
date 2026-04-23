@@ -29,6 +29,10 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
 
+    /// Contextual strings to improve recognition accuracy.
+    /// Set before calling startTask().
+    var contextualStrings: [String] = []
+
     var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
@@ -125,6 +129,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
 
         // Start analyzer — get format and start ASAP to minimize latency
         let pendingCleanup = cleanupTask
+        let contextStrings = contextualStrings
         analyzerTask = Task.detached { [weak self] in
             await pendingCleanup?.value
             let gen = await self?.generation
@@ -134,14 +139,28 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                 let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber, detector])
                 guard await self?.generation == myGeneration else { return }
 
-                let analyzer = SpeechAnalyzer(modules: [transcriber, detector])
+                // Build AnalysisContext with caller-provided contextual strings
+                let analysisContext = AnalysisContext()
+                if !contextStrings.isEmpty {
+                    analysisContext.contextualStrings[.general] = contextStrings
+                    print("[Speech] AnalysisContext: \(contextStrings.count) contextual strings")
+                }
+
+                // Set format BEFORE creating analyzer so appendBuffer can convert
                 await MainActor.run {
                     self?.analyzerFormat = format
+                }
+
+                let analyzer = SpeechAnalyzer(
+                    inputSequence: stream,
+                    modules: [transcriber, detector],
+                    analysisContext: analysisContext
+                )
+                await MainActor.run {
                     self?.analyzer = analyzer
                 }
 
-                // start() returns immediately — analyzer begins consuming stream
-                try await analyzer.start(inputSequence: stream)
+                try await analyzer.prepareToAnalyze(in: format)
                 print("[Speech] Analyzer started gen=\(myGeneration)")
             } catch {
                 guard !Task.isCancelled else { return }

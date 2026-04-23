@@ -25,6 +25,16 @@ public class STTManager: NSObject, ObservableObject {
     /// True when SpeechDetector detects speech in the audio stream.
     @Published public var speechDetected: Bool = false
 
+    /// Contextual strings to improve speech recognition accuracy.
+    /// Set before calling start(). Examples: app names, person names, technical terms.
+    public var contextualStrings: [String] = [] {
+        didSet {
+            if let backend = speech as? SpeechAnalyzerBackend {
+                backend.contextualStrings = contextualStrings
+            }
+        }
+    }
+
     /// Called when a sentence is finalized — for debug logging.
     public var onSentenceFinalized: ((_ text: String) -> Void)?
 
@@ -150,6 +160,10 @@ public class STTManager: NSObject, ObservableObject {
         if let analyzerBackend = speech as? SpeechAnalyzerBackend {
             analyzerBackend.onSpeechDetected = { [weak self] detected in
                 self?.speechDetected = detected
+            }
+            // Propagate contextual strings set before wireUp
+            if !contextualStrings.isEmpty {
+                analyzerBackend.contextualStrings = contextualStrings
             }
         }
 
