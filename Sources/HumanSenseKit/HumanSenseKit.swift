@@ -46,6 +46,16 @@ public class HumanSenseKit {
     public var currentARFrame: ARFrame? {
         engine.currentARFrame
     }
+
+    /// Lip-audio correlation value (0-1). Higher = lips and audio are in sync.
+    public var lipCorrelation: Float {
+        engine.lipAudioCorrelator.correlation
+    }
+
+    /// Whether lip-audio correlation passes the threshold.
+    public var lipCorrelated: Bool {
+        engine.lipAudioCorrelator.isCorrelated
+    }
     
     // MARK: - Debug UI
     
