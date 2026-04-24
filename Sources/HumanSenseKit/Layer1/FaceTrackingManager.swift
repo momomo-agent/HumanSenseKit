@@ -123,39 +123,41 @@ extension FaceTrackingManager: ARSessionDelegate {
         // No async queue = no closures retaining ARFrame
 
         let (yaw, pitch, roll) = extractHeadOrientation(from: anchor.transform)
-        let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
         let orientation = cachedOrientation
         let size = cachedScreenSize
 
+        // Face-direction ray casting:
+        // Instead of projecting lookAtPoint (noisy eye data),
+        // cast a ray from face position along face forward direction (-Z axis)
+        // and find where it intersects the camera plane (z=0).
+        let facePos = SIMD3<Float>(anchor.transform.columns.3.x,
+                                   anchor.transform.columns.3.y,
+                                   anchor.transform.columns.3.z)
+        // Face forward direction in world space (-Z column of transform)
+        let faceForward = SIMD3<Float>(-anchor.transform.columns.2.x,
+                                       -anchor.transform.columns.2.y,
+                                       -anchor.transform.columns.2.z)
+        // Ray-plane intersection: find t where facePos.z + t * faceForward.z = 0
+        let gazeWorldPoint: SIMD3<Float>
+        if abs(faceForward.z) > 0.001 {
+            let t = -facePos.z / faceForward.z
+            gazeWorldPoint = facePos + t * faceForward
+        } else {
+            // Fallback to lookAtPoint if face is parallel to screen
+            let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
+            gazeWorldPoint = SIMD3<Float>(lookAtVector.x, lookAtVector.y, lookAtVector.z)
+        }
+
         let lookPoint = frame.camera.projectPoint(
-            SIMD3<Float>(x: lookAtVector.x, y: lookAtVector.y, z: lookAtVector.z),
+            gazeWorldPoint,
             orientation: orientation,
             viewportSize: size
         )
 
         let adjustedX = size.width - lookPoint.x
         let adjustedY = size.height - lookPoint.y
-
-        // Face-camera angle compensation:
-        // When face is not perpendicular to device (e.g. lying down, phone on desk),
-        // ARKit's gaze projection drifts on Y-axis.
-        // Use face pitch (from faceAnchor.transform) to compensate.
-        // pitch ≈ 0 = face perpendicular to camera (ideal)
-        // pitch > 0.35 (~20°) = face tilted relative to camera
-        let facePitch = pitch  // already extracted from anchor.transform
-        let tiltThreshold: Float = 0.35  // ~20°, below this no compensation
-        let compensatedY: CGFloat
-        if abs(facePitch) > tiltThreshold {
-            // How far from ideal (0°) toward extreme (~60°)
-            let maxPitch: Float = 1.05  // ~60°
-            let tiltRatio = CGFloat(min((abs(facePitch) - tiltThreshold) / (maxPitch - tiltThreshold), 1.0))
-            let centerY = size.height / 2
-            // Blend gaze toward center proportional to face-camera angle
-            compensatedY = adjustedY + (centerY - adjustedY) * tiltRatio * 0.35
-        } else {
-            compensatedY = adjustedY
-        }
         let compensatedX = adjustedX
+        let compensatedY = adjustedY
 
         let bs = anchor.blendShapes
         let jawOpen = bs[.jawOpen]?.floatValue ?? 0
