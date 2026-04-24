@@ -140,7 +140,8 @@ extension FaceTrackingManager: ARSessionDelegate {
         let compensatedY = adjustedY
 
         // Face-direction ray: project face forward vector tip for comparison
-        let faceForwardWorld = anchor.transform * SIMD4<Float>(0, 0, -0.5, 1)
+        let faceDistance = max(abs(anchor.transform.columns.3.z), 0.1)
+        let faceForwardWorld = anchor.transform * SIMD4<Float>(0, 0, -Float(faceDistance), 1)
         let eyeLookPoint = frame.camera.projectPoint(
             SIMD3<Float>(faceForwardWorld.x, faceForwardWorld.y, faceForwardWorld.z),
             orientation: orientation,
