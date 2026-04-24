@@ -67,8 +67,8 @@ public class AudioEngineManager {
             let session = AVAudioSession.sharedInstance()
             do {
                 if session.category != .playAndRecord {
-                    try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
-                    print("[Audio] Session configured: playAndRecord")
+                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+                    print("[Audio] Session configured: playAndRecord/voiceChat (VoiceProcessingIO)")
                 }
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
                 try session.overrideOutputAudioPort(.speaker)
