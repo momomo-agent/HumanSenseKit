@@ -18,7 +18,8 @@ public enum HeadOrientation {
 
 public struct FaceState {
     // Gaze
-    public var gazePoint: CGPoint = .zero
+    public var gazePoint: CGPoint = .zero       // face-direction ray cast
+    public var gazePointEye: CGPoint = .zero    // eye lookAtPoint projection
     public var isLookingAtScreen: Bool = false
 
     // Head orientation (radians)

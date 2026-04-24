@@ -159,6 +159,16 @@ extension FaceTrackingManager: ARSessionDelegate {
         let compensatedX = adjustedX
         let compensatedY = adjustedY
 
+        // Eye-based gaze point (original lookAtPoint projection)
+        let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
+        let eyeLookPoint = frame.camera.projectPoint(
+            SIMD3<Float>(lookAtVector.x, lookAtVector.y, lookAtVector.z),
+            orientation: orientation,
+            viewportSize: size
+        )
+        let eyeAdjustedX = size.width - eyeLookPoint.x
+        let eyeAdjustedY = size.height - eyeLookPoint.y
+
         let bs = anchor.blendShapes
         let jawOpen = bs[.jawOpen]?.floatValue ?? 0
         let mouthClose = bs[.mouthClose]?.floatValue ?? 0
@@ -204,6 +214,7 @@ extension FaceTrackingManager: ARSessionDelegate {
             newState.faceDetected = true
             newState.gazePoint = CGPoint(x: self.gazeFilterX?.value ?? adjustedX,
                                         y: self.gazeFilterY?.value ?? adjustedY)
+            newState.gazePointEye = CGPoint(x: eyeAdjustedX, y: eyeAdjustedY)
 
             newState.headYaw = yaw
             newState.headPitch = pitch
