@@ -206,14 +206,26 @@ extension FaceTrackingManager: ARSessionDelegate {
             newState.distanceFromCamera = distance
 
             let screenSize = self.cachedScreenSize
-            let marginX = screenSize.width * 0.1
+            let marginX = screenSize.width * 0.15
             let gazeX = self.gazeFilterX?.value ?? adjustedX
             let gazeY = self.gazeFilterY?.value ?? adjustedY
-            let gazeInScreen = gazeX > marginX && gazeX < screenSize.width - marginX &&
-                              gazeY > 0 && gazeY < screenSize.height
+
+            // Fused gaze point: center + (face - eye) * scale
+            let scaleX = distance > 0 ? 0.5 / Double(distance) : 1.0
+            let scaleY = scaleX * (1.0 + abs(Double(pitch)) * 0.5)
+            let centerX = Double(screenSize.width / 2)
+            let centerY = Double(screenSize.height / 2)
+            let diffX = Double(gazeX) - Double(eyeAdjustedX)
+            let diffY = Double(gazeY) - Double(eyeAdjustedY)
+            let fusedX = centerX + diffX * scaleX
+            let fusedY = centerY + diffY * scaleY
+            newState.gazePointFused = CGPoint(x: fusedX, y: fusedY)
+
+            let fusedInScreen = fusedX > Double(marginX) && fusedX < Double(screenSize.width) - Double(marginX) &&
+                                fusedY > 0 && fusedY < Double(screenSize.height)
             // Head pose check: pitch -40°..50°, yaw ±30°
             let headPoseValid = (-0.7...0.87).contains(pitch) && (-0.52...0.52).contains(yaw)
-            newState.isLookingAtScreen = gazeInScreen && headPoseValid
+            newState.isLookingAtScreen = fusedInScreen && headPoseValid
 
             newState.jawOpen = jawOpen
             newState.mouthClose = mouthClose
