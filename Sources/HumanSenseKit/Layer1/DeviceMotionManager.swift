@@ -22,6 +22,7 @@ public class DeviceMotionManager: ObservableObject {
             motionManager.deviceMotionUpdateInterval = 0.1
             motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
                 guard let motion = motion else { return }
+                self?.deviceState.gravity = (motion.gravity.x, motion.gravity.y, motion.gravity.z)
                 self?.updatePosture(from: motion)
                 self?.updateHoldingState(from: motion)
             }

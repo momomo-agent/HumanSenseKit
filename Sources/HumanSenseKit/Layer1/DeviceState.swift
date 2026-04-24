@@ -20,6 +20,8 @@ public struct DeviceState {
     public var orientation: DeviceOrientation = .portrait
     public var isWalking: Bool = false
     public var isHolding: Bool = false
+    /// Raw gravity vector from CMDeviceMotion.
+    public var gravity: (x: Double, y: Double, z: Double) = (0, -1, 0)
 
     public init(posture: DevicePosture = .uprightStand, orientation: DeviceOrientation = .portrait, isWalking: Bool = false, isHolding: Bool = false) {
         self.posture = posture

@@ -129,10 +129,11 @@ public class HumanStateEngine {
             }
             .store(in: &cancellables)
 
-        // Device → humanState.device
+        // Device → humanState.device + faceTracking gravity
         deviceMotionManager.$deviceState
             .sink { [weak self] device in
                 self?.humanState.device = device
+                self?.faceTrackingManager.deviceGravity = device.gravity
             }
             .store(in: &cancellables)
 

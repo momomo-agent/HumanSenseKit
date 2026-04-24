@@ -31,6 +31,9 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     nonisolated(unsafe) private var hasSignaledReady: Bool = false
     nonisolated(unsafe) private var cachedOrientation: UIInterfaceOrientation = .portrait
     nonisolated(unsafe) private var cachedScreenSize: CGSize = CGSize(width: 390, height: 844)
+    /// Device gravity vector for gaze posture compensation.
+    /// Updated from DeviceMotionManager. gravity.z ≈ -1 means face-up (lying), gravity.y ≈ -1 means upright.
+    nonisolated(unsafe) public var deviceGravity: (x: Double, y: Double, z: Double) = (0, -1, 0)
     private let noFaceThreshold = 5
 
     public weak var handManager: HandGestureManager?
@@ -133,6 +136,27 @@ extension FaceTrackingManager: ARSessionDelegate {
         let adjustedX = size.width - lookPoint.x
         let adjustedY = size.height - lookPoint.y
 
+        // Posture-based gaze compensation:
+        // When lying down (gravity.z ≈ -1), ARKit's gaze projection drifts.
+        // Compute device tilt angle from gravity and apply Y-axis correction.
+        let grav = self.deviceGravity
+        // devicePitch: 0 = upright, π/2 = face-up (lying)
+        let devicePitch = atan2(-grav.z, -grav.y)  // radians
+        // Only compensate when tilted beyond 20° from upright
+        let tiltThreshold: Float = 0.35  // ~20°
+        let compensatedY: CGFloat
+        if abs(Float(devicePitch)) > tiltThreshold {
+            // Scale factor: more tilt = more compensation
+            // At 90° (fully lying), shift gaze toward screen center
+            let tiltRatio = CGFloat(min(abs(devicePitch) / (.pi / 2), 1.0))
+            let centerY = size.height / 2
+            // Blend gaze toward center proportional to tilt
+            compensatedY = adjustedY + (centerY - adjustedY) * tiltRatio * 0.3
+        } else {
+            compensatedY = adjustedY
+        }
+        let compensatedX = adjustedX  // X-axis: no compensation needed for lying down
+
         let bs = anchor.blendShapes
         let jawOpen = bs[.jawOpen]?.floatValue ?? 0
         let mouthClose = bs[.mouthClose]?.floatValue ?? 0
@@ -167,11 +191,11 @@ extension FaceTrackingManager: ARSessionDelegate {
             guard let self = self else { return }
 
             if self.gazeFilterX == nil {
-                self.gazeFilterX = LowPassFilter(value: adjustedX)
-                self.gazeFilterY = LowPassFilter(value: adjustedY)
+                self.gazeFilterX = LowPassFilter(value: compensatedX)
+                self.gazeFilterY = LowPassFilter(value: compensatedY)
             } else {
-                self.gazeFilterX?.update(with: adjustedX)
-                self.gazeFilterY?.update(with: adjustedY)
+                self.gazeFilterX?.update(with: compensatedX)
+                self.gazeFilterY?.update(with: compensatedY)
             }
 
             var newState = FaceState()
