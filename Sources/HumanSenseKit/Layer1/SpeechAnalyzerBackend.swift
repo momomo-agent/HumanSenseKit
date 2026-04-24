@@ -33,7 +33,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     /// Set before calling startTask().
     var contextualStrings: [String] = []
 
-    var onResult: ((_ text: String, _ isFinal: Bool) -> Void)?
+    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?) -> Void)?
     var onError: ((Error) -> Void)?
 
     /// Called from audio render thread — must be nonisolated.
@@ -75,6 +75,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             locale: Locale(identifier: "zh-CN"),
             preset: .progressiveTranscription
         )
+        transcriber.speakerDiarizationEnabled = true
         self.transcriber = transcriber
 
         let detector = SpeechDetector(
@@ -93,10 +94,11 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
-                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
+                    let speakerLabel = result.speakerLabel
+                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0) speaker=\(speakerLabel ?? "nil")")
                     await MainActor.run {
                         guard let self, self.generation == myGeneration else { return }
-                        self.onResult?(text, isFinal)
+                        self.onResult?(text, isFinal, speakerLabel)
                     }
                 }
             } catch {

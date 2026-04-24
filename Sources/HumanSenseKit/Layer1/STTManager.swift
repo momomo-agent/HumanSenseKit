@@ -12,6 +12,8 @@ public class STTManager: NSObject, ObservableObject {
     @Published public var segments: [SpeechSegment] = []
     @Published public var isListening: Bool = false
     @Published public var lastError: String?
+    /// Current speaker label from diarization (nil if unavailable).
+    @Published public var currentSpeakerLabel: String?
 
     /// Which speech recognition engine to use.
     public enum BackendType: Sendable {
@@ -145,11 +147,11 @@ public class STTManager: NSObject, ObservableObject {
         }
 
         // Layer 1 → Layer 2: transcription results feed sentence builder
-        speech.onResult = { [weak self] text, isFinal in
+        speech.onResult = { [weak self] text, isFinal, speakerLabel in
             guard let self else { return }
+            self.currentSpeakerLabel = speakerLabel
             self.builder.handleResult(text: text, isFinal: isFinal)
             if isFinal {
-                // Apple finalized this segment — reset for next sentence
                 self.onSentenceFinalized?(text)
                 self.builder.resetActive()
             }

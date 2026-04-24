@@ -6,7 +6,7 @@ import AVFoundation
 /// are `SpeechAnalyzerBackend` (iOS 26) and `SFSpeechBackend` (legacy).
 @MainActor
 protocol SpeechRecognitionBackend: AnyObject {
-    var onResult: ((_ text: String, _ isFinal: Bool) -> Void)? { get set }
+    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer)
     func startTask()
