@@ -23,8 +23,10 @@ public class STTManager: NSObject, ObservableObject {
         case sfSpeechRecognizer
     }
 
-    /// Apple's ML-based voice activity detection.
-    /// True when SpeechDetector detects speech in the audio stream.
+    /// When true, audio buffers are discarded and STT is effectively paused.
+    /// Use this to suppress recognition when the user is not facing the screen.
+    public var isMuted: Bool = false
+
     @Published public var speechDetected: Bool = false
 
     /// Contextual strings to improve speech recognition accuracy.
@@ -131,7 +133,8 @@ public class STTManager: NSObject, ObservableObject {
         weak var audioDetection = self.audioDetectionManager
 
         // Layer 0 → Layer 1: audio buffers feed recognition
-        audio.onBuffer = { buffer in
+        audio.onBuffer = { [weak self] buffer in
+            guard self?.isMuted != true else { return }
             speech.appendBuffer(buffer)
             Task { @MainActor in
                 audioDetection?.processBuffer(buffer)
