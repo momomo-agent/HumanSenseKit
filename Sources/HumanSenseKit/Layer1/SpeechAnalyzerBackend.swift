@@ -75,7 +75,6 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             locale: Locale(identifier: "zh-CN"),
             preset: .progressiveTranscription
         )
-        transcriber.speakerDiarizationEnabled = true
         self.transcriber = transcriber
 
         let detector = SpeechDetector(
@@ -94,11 +93,10 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
-                    let speakerLabel = result.speakerLabel
-                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0) speaker=\(speakerLabel ?? "nil")")
+                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
                     await MainActor.run {
                         guard let self, self.generation == myGeneration else { return }
-                        self.onResult?(text, isFinal, speakerLabel)
+                        self.onResult?(text, isFinal, nil)
                     }
                 }
             } catch {
