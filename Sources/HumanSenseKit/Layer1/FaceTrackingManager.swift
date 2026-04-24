@@ -126,30 +126,10 @@ extension FaceTrackingManager: ARSessionDelegate {
         let orientation = cachedOrientation
         let size = cachedScreenSize
 
-        // Face-direction ray casting:
-        // Instead of projecting lookAtPoint (noisy eye data),
-        // cast a ray from face position along face forward direction (-Z axis)
-        // and find where it intersects the camera plane (z=0).
-        let facePos = SIMD3<Float>(anchor.transform.columns.3.x,
-                                   anchor.transform.columns.3.y,
-                                   anchor.transform.columns.3.z)
-        // Face forward direction in world space (-Z column of transform)
-        let faceForward = SIMD3<Float>(-anchor.transform.columns.2.x,
-                                       -anchor.transform.columns.2.y,
-                                       -anchor.transform.columns.2.z)
-        // Ray-plane intersection: find t where facePos.z + t * faceForward.z = 0
-        let gazeWorldPoint: SIMD3<Float>
-        if abs(faceForward.z) > 0.001 {
-            let t = -facePos.z / faceForward.z
-            gazeWorldPoint = facePos + t * faceForward
-        } else {
-            // Fallback to lookAtPoint if face is parallel to screen
-            let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
-            gazeWorldPoint = SIMD3<Float>(lookAtVector.x, lookAtVector.y, lookAtVector.z)
-        }
-
+        // Eye-based gaze point (lookAtPoint projection)
+        let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
         let lookPoint = frame.camera.projectPoint(
-            gazeWorldPoint,
+            SIMD3<Float>(lookAtVector.x, lookAtVector.y, lookAtVector.z),
             orientation: orientation,
             viewportSize: size
         )
@@ -159,10 +139,10 @@ extension FaceTrackingManager: ARSessionDelegate {
         let compensatedX = adjustedX
         let compensatedY = adjustedY
 
-        // Eye-based gaze point (original lookAtPoint projection)
-        let lookAtVector = anchor.transform * SIMD4<Float>(anchor.lookAtPoint, 1)
+        // Face-direction ray: project face forward vector tip for comparison
+        let faceForwardWorld = anchor.transform * SIMD4<Float>(0, 0, -0.5, 1)
         let eyeLookPoint = frame.camera.projectPoint(
-            SIMD3<Float>(lookAtVector.x, lookAtVector.y, lookAtVector.z),
+            SIMD3<Float>(faceForwardWorld.x, faceForwardWorld.y, faceForwardWorld.z),
             orientation: orientation,
             viewportSize: size
         )
