@@ -133,7 +133,7 @@ public class HumanStateEngine {
         deviceMotionManager.$deviceState
             .sink { [weak self] device in
                 self?.humanState.device = device
-                self?.faceTrackingManager.deviceGravity = device.gravity
+                self?.faceManager.deviceGravity = device.gravity
             }
             .store(in: &cancellables)
 
