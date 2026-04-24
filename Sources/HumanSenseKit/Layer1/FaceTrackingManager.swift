@@ -136,26 +136,26 @@ extension FaceTrackingManager: ARSessionDelegate {
         let adjustedX = size.width - lookPoint.x
         let adjustedY = size.height - lookPoint.y
 
-        // Posture-based gaze compensation:
-        // When lying down (gravity.z ≈ -1), ARKit's gaze projection drifts.
-        // Compute device tilt angle from gravity and apply Y-axis correction.
-        let grav = self.deviceGravity
-        // devicePitch: 0 = upright, π/2 = face-up (lying)
-        let devicePitch = atan2(-grav.z, -grav.y)  // radians
-        // Only compensate when tilted beyond 20° from upright
-        let tiltThreshold: Float = 0.35  // ~20°
+        // Face-camera angle compensation:
+        // When face is not perpendicular to device (e.g. lying down, phone on desk),
+        // ARKit's gaze projection drifts on Y-axis.
+        // Use face pitch (from faceAnchor.transform) to compensate.
+        // pitch ≈ 0 = face perpendicular to camera (ideal)
+        // pitch > 0.35 (~20°) = face tilted relative to camera
+        let facePitch = pitch  // already extracted from anchor.transform
+        let tiltThreshold: Float = 0.35  // ~20°, below this no compensation
         let compensatedY: CGFloat
-        if abs(Float(devicePitch)) > tiltThreshold {
-            // Scale factor: more tilt = more compensation
-            // At 90° (fully lying), shift gaze toward screen center
-            let tiltRatio = CGFloat(min(abs(devicePitch) / (.pi / 2), 1.0))
+        if abs(facePitch) > tiltThreshold {
+            // How far from ideal (0°) toward extreme (~60°)
+            let maxPitch: Float = 1.05  // ~60°
+            let tiltRatio = CGFloat(min((abs(facePitch) - tiltThreshold) / (maxPitch - tiltThreshold), 1.0))
             let centerY = size.height / 2
-            // Blend gaze toward center proportional to tilt
-            compensatedY = adjustedY + (centerY - adjustedY) * tiltRatio * 0.3
+            // Blend gaze toward center proportional to face-camera angle
+            compensatedY = adjustedY + (centerY - adjustedY) * tiltRatio * 0.35
         } else {
             compensatedY = adjustedY
         }
-        let compensatedX = adjustedX  // X-axis: no compensation needed for lying down
+        let compensatedX = adjustedX
 
         let bs = anchor.blendShapes
         let jawOpen = bs[.jawOpen]?.floatValue ?? 0
