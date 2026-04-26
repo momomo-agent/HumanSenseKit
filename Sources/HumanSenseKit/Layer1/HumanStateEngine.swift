@@ -214,7 +214,15 @@ public class HumanStateEngine {
         // fall back to audio.isSpeaking (RMS threshold).
         // Combined with lip-audio correlation for "is it THIS person speaking?"
         let voiceActive = sttManager.speechDetected || audio.isSpeaking
-        let isCorr = lipAudioCorrelator.isCorrelated
+        // Don't wait for the correlator to be hot *right now* — short
+        // utterances peak and vanish inside a single sub-window. If we
+        // ever saw correlation in the last ~1s while voice was active,
+        // keep the user-speaking state latched. This mirrors how humans
+        // infer 'someone is talking': we don't need every instant to be
+        // correlated, just that the correlation happened recently.
+        let isCorrNow = lipAudioCorrelator.isCorrelated
+        let isCorrRecent = lipAudioCorrelator.wasCorrelated(within: 1.0)
+        let isCorr = isCorrNow || isCorrRecent
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
 
@@ -222,9 +230,10 @@ public class HumanStateEngine {
         let now = Date()
         if now.timeIntervalSince(lastDiagLog) > 0.5 {
             print(String(format:
-                "[HSE] voice=%@ corr=%@(%.2f lipVar=%.4f) lookAt=%@ headFwd=%@ | sttSpeech=%@ audioSpk=%@ mouth=%@",
+                "[HSE] voice=%@ corr=%@[%@](%.2f lipVar=%.4f) lookAt=%@ headFwd=%@ | sttSpeech=%@ audioSpk=%@ mouth=%@",
                 voiceActive ? "✓" : "·",
-                isCorr ? "✓" : "·",
+                isCorrNow ? "✓" : "·",
+                isCorrRecent ? "R" : "·",
                 lipAudioCorrelator.correlation,
                 lipAudioCorrelator.lipVariance,
                 lookAt ? "✓" : "·",

@@ -53,11 +53,23 @@ public class LipAudioCorrelator {
     /// Lip envelope variance (for debug display)
     public private(set) var lipVariance: Float = 0
 
-    /// Whether the user is speaking.
+    /// Timestamp of the most recent frame that passed the correlation gate.
+    /// `.distantPast` until the first correlated frame.
+    public private(set) var lastCorrelatedAt: TimeInterval = -Double.greatestFiniteMagnitude
+
+    /// Whether the user is speaking (instantaneous).
     public var isCorrelated: Bool {
         if samples.count < minSamples { return false }
         if lipVariance < 0.0001 { return false }
         return correlation > correlationThreshold
+    }
+
+    /// Whether the correlator saw a correlated frame within the last `seconds`.
+    /// Useful for classifying short utterances whose instantaneous correlation
+    /// hasn't warmed up yet but recently did.
+    public func wasCorrelated(within seconds: TimeInterval,
+                              now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        return (now - lastCorrelatedAt) <= seconds
     }
 
     /// Snapshot of current window for visualization.
@@ -186,6 +198,13 @@ public class LipAudioCorrelator {
         lipVariance = lipStds.reduce(0) { $0 + ($1 - meanLip) * ($1 - meanLip) } / n
         lipOnlyCount = lipOnly
         audioOnlyCount = audioOnly
+
+        // Record the most recent moment the full gate passed, so short
+        // utterances that reach isCorrelated=true only briefly can still be
+        // attributed to the user later when STT finally emits text.
+        if lipVariance >= 0.0001 && correlation > correlationThreshold {
+            lastCorrelatedAt = timestamp
+        }
     }
 
     // MARK: - Rolling std envelope
