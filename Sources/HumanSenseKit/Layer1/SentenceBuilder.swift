@@ -232,18 +232,18 @@ public class SentenceBuilder {
     private func speakingToAIScore(for s: Sentence) -> Float {
         // Use per-char gaze spans (updated throughout the sentence) with
         // exponential decay weighting — early characters matter more.
+        // w = exp(-lambda * charIndex), so char 0 dominates and later chars
+        // quickly decay to near-zero. This means the verdict is decided by
+        // the first few chars of the sentence, not the tail.
         let spans = s.gazeSpans
         guard !spans.isEmpty else { return 0 }
-        let totalChars = spans.reduce(0) { $0 + $1.charCount }
-        guard totalChars > 0 else { return 0 }
 
         var score: Float = 0
         var totalWeight: Float = 0
         var charIndex = 0
         for span in spans {
             for _ in 0..<span.charCount {
-                let t = Float(charIndex) / Float(max(1, totalChars - 1))
-                let w = expf(-gazeDecayLambda * t)
+                let w = expf(-gazeDecayLambda * Float(charIndex))
                 score += w * (span.isToScreen ? 1 : 0)
                 totalWeight += w
                 charIndex += 1
