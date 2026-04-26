@@ -11,6 +11,7 @@ protocol SpeechRecognitionBackend: AnyObject {
     var onFirstBuffer: ((Date) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer)
+    nonisolated func noteBufferTime(buffer: AVAudioPCMBuffer, when: AVAudioTime)
     func startTask()
     func stop()
     func authorize(completion: @escaping @Sendable (Bool) -> Void)

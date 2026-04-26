@@ -26,6 +26,11 @@ final class SFSpeechBackend: SpeechRecognitionBackend {
         recognitionRequest?.append(buffer)
     }
 
+    nonisolated func noteBufferTime(buffer: AVAudioPCMBuffer, when: AVAudioTime) {
+        // SFSpeechRecognizer doesn't expose per-token audio time ranges,
+        // so we don't need precise origin stamping here.
+    }
+
     func startTask() {
         taskGeneration += 1
         let gen = taskGeneration

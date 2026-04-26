@@ -166,6 +166,13 @@ public class STTManager: NSObject, ObservableObject {
             }
         }
 
+        // Separately forward the AVAudioTime so the STT backend can stamp an
+        // accurate t=0 for its analyzer timeline on the first buffer.
+        audio.onBufferWithTime = { [weak self] buffer, when in
+            guard self?.isMuted != true else { return }
+            speech.noteBufferTime(buffer: buffer, when: when)
+        }
+
         // Layer 0: engine restart → restart recognition
         audio.onRestart = { [weak self] in
             Task { @MainActor in

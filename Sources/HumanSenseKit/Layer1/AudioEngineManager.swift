@@ -21,6 +21,10 @@ public class AudioEngineManager {
     /// Called when audio buffers are available.
     /// nonisolated(unsafe) because the audio tap fires on the render thread.
     public nonisolated(unsafe) var onBuffer: ((AVAudioPCMBuffer) -> Void)?
+    /// Same as onBuffer but also delivers the AVAudioTime from the tap,
+    /// which lets consumers reconstruct the exact host time of the buffer's
+    /// first sample. Used for accurate STT↔sensor alignment.
+    public nonisolated(unsafe) var onBufferWithTime: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?
 
     /// Called when the engine needs to be restarted (after interruption/death).
     public nonisolated(unsafe) var onRestart: (() -> Void)?
@@ -86,8 +90,9 @@ public class AudioEngineManager {
         }
         retryCount = 0
         
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { @Sendable [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { @Sendable [weak self] buffer, when in
             self?.onBuffer?(buffer)
+            self?.onBufferWithTime?(buffer, when)
         }
         
         if !usesExternalEngine {

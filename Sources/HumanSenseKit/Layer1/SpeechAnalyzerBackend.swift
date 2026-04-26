@@ -43,6 +43,30 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
+    /// Called from the audio render thread before appendBuffer. Uses the
+    /// tap's AVAudioTime to compute the wall-clock instant of the buffer's
+    /// *first* sample — this is the exact origin for analyzer-relative
+    /// CMTime offsets, so we stamp it before any buffer is yielded.
+    nonisolated func noteBufferTime(buffer: AVAudioPCMBuffer, when: AVAudioTime) {
+        guard firstBufferWallTime == nil else { return }
+        let origin = Self.firstSampleWallTime(buffer: buffer, when: when)
+        firstBufferWallTime = origin
+        let callback = onFirstBuffer
+        Task { @MainActor in callback?(origin) }
+    }
+
+    /// Convert tap's AVAudioTime (hostTime = last sample) back to the
+    /// wall-clock Date of the buffer's first sample.
+    nonisolated private static func firstSampleWallTime(buffer: AVAudioPCMBuffer, when: AVAudioTime) -> Date {
+        // hostTime is the time the *last* sample was captured. Back up by
+        // (frameLength - 1) samples to get the first sample's host time.
+        let sampleRate = buffer.format.sampleRate
+        let backSeconds = Double(max(0, Int(buffer.frameLength) - 1)) / sampleRate
+        let hostNanos = AVAudioTime.seconds(forHostTime: when.hostTime)
+        let lastWall = Date() - (AVAudioTime.seconds(forHostTime: mach_absolute_time()) - hostNanos)
+        return lastWall.addingTimeInterval(-backSeconds)
+    }
+
     /// Called from audio render thread — must be nonisolated.
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let continuation = inputContinuation else { return }
@@ -50,12 +74,12 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             // Format not yet known — drop buffer to avoid sending Float32 to analyzer
             return
         }
-        // Stamp t=0 on the very first buffer we actually yield — this is
-        // the true analyzer-relative origin for wall-clock conversion.
+        // Fallback: if noteBufferTime wasn't called for some reason, still
+        // approximate the origin here. This is slightly later than the real
+        // first sample but prevents missing the stamp entirely.
         if firstBufferWallTime == nil {
             let now = Date()
             firstBufferWallTime = now
-            // Hop to main actor to publish without capturing self
             let callback = onFirstBuffer
             Task { @MainActor in callback?(now) }
         }
