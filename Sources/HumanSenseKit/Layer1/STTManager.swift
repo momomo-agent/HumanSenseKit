@@ -44,6 +44,9 @@ public class STTManager: NSObject, ObservableObject {
     /// systemTime = audioStreamStartTime + audioOffset
     public private(set) var audioStreamStartTime: Date?
 
+    /// Called when a sentence is finalized — for debug logging.
+    public var onSentenceFinalized: ((_ text: String) -> Void)?
+
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
         get { builder.captureSignals }
