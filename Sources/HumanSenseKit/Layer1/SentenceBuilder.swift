@@ -60,13 +60,18 @@ public class SentenceBuilder {
         print("[SentenceBuilder] handleResult: '\(text.prefix(40))' isFinal=\(isFinal) chars=\(newCharCount) isSpeaking=\(isSpeaking)")
 
         if activeSentence == nil {
-            // Start a new sentence
+            // Start a new sentence. Always seed a gaze span covering the
+            // current text so the score sees *every* character, regardless of
+            // whether the user started by looking at the screen.
             let snap = captureSignals?() ?? SpeechSegment.SignalSnapshot()
+            let seedSpan = newCharCount > 0
+                ? [GazeSpan(charCount: newCharCount, isToScreen: isLookingAtScreen)]
+                : []
             activeSentence = Sentence(
                 text: text,
                 isFinal: false,
                 startedLookingAtScreen: isLookingAtScreen,
-                gazeSpans: isLookingAtScreen ? [GazeSpan(charCount: newCharCount, isToScreen: true)] : [],
+                gazeSpans: seedSpan,
                 isFromUser: isSpeaking,
                 signals: snap
             )
@@ -78,9 +83,11 @@ public class SentenceBuilder {
 
             // isFromUser and signals are locked at sentence creation — don't update mid-sentence
 
-            if addedChars > 0, activeSentence?.startedLookingAtScreen == true {
+            // Always update gaze spans so the score reflects the entire
+            // sentence — not just sentences that started on-screen.
+            if addedChars > 0 {
                 updateGazeSpans(addedChars: addedChars)
-            } else if newCharCount != lastCharCount, activeSentence?.startedLookingAtScreen == true {
+            } else if newCharCount != lastCharCount {
                 ensureGazeSpansCoverText(text)
             }
             lastCharCount = newCharCount
@@ -221,12 +228,18 @@ public class SentenceBuilder {
     // MARK: - Private: Gaze Helpers
 
     private func updateGazeSpans(addedChars: Int) {
-        guard var spans = activeSentence?.gazeSpans, !spans.isEmpty else { return }
-        let lastSpan = spans[spans.count - 1]
-        if lastSpan.isToScreen == isLookingAtScreen {
-            spans[spans.count - 1] = GazeSpan(charCount: lastSpan.charCount + addedChars, isToScreen: lastSpan.isToScreen)
-        } else {
+        var spans = activeSentence?.gazeSpans ?? []
+        if spans.isEmpty {
+            // Sentence started with no gaze span recorded (legacy callsite).
+            // Seed one now so the new chars get tracked.
             spans.append(GazeSpan(charCount: addedChars, isToScreen: isLookingAtScreen))
+        } else {
+            let lastSpan = spans[spans.count - 1]
+            if lastSpan.isToScreen == isLookingAtScreen {
+                spans[spans.count - 1] = GazeSpan(charCount: lastSpan.charCount + addedChars, isToScreen: lastSpan.isToScreen)
+            } else {
+                spans.append(GazeSpan(charCount: addedChars, isToScreen: isLookingAtScreen))
+            }
         }
         activeSentence?.gazeSpans = spans
     }
