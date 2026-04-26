@@ -68,6 +68,19 @@ public struct SpeechSegment: Identifiable {
     }
 }
 
+/// A single STT token (character/word) with its audio time range.
+/// Exposed for fine-grained alignment with other signals (e.g. lip movement).
+public struct SpeechToken: Equatable {
+    public let text: String
+    public let startTime: Double
+    public let endTime: Double
+    public init(text: String, startTime: Double, endTime: Double) {
+        self.text = text
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+}
+
 public struct SpeechState {
     public var segments: [SpeechSegment] = []
     public var isListening: Bool = false

@@ -18,6 +18,7 @@ final class SFSpeechBackend: SpeechRecognitionBackend {
     private let maxTaskDuration: TimeInterval = 50.0
 
     var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?, _ audioStartTime: Double?, _ audioEndTime: Double?) -> Void)?
+    var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {

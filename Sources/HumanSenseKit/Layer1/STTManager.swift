@@ -47,6 +47,11 @@ public class STTManager: NSObject, ObservableObject {
     /// Called when a sentence is finalized — for debug logging.
     public var onSentenceFinalized: ((_ text: String) -> Void)?
 
+    /// Called whenever new token-level transcription data arrives (volatile or final).
+    /// Each token carries its audio time range (seconds, relative to audio stream start).
+    /// Combine with `audioStreamStartTime` to align with wall-clock signals.
+    public var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)?
+
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
         get { builder.captureSignals }
@@ -186,6 +191,10 @@ public class STTManager: NSObject, ObservableObject {
             if !contextualStrings.isEmpty {
                 analyzerBackend.contextualStrings = contextualStrings
             }
+        }
+
+        speech.onTokens = { [weak self] tokens, isFinal in
+            self?.onTokens?(tokens, isFinal)
         }
 
         speech.onError = { [weak self] error in

@@ -34,6 +34,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     var contextualStrings: [String] = []
 
     var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?, _ audioStartTime: Double?, _ audioEndTime: Double?) -> Void)?
+    var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
     /// Called from audio render thread — must be nonisolated.
@@ -95,10 +96,14 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                     let isFinal = result.isFinal
                     let startTime = result.range.start.seconds
                     let endTime = (result.range.start + result.range.duration).seconds
-                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
+                    let tokens = Self.extractTokens(from: result.text)
+                    print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0) tokens=\(tokens.count)")
                     await MainActor.run {
                         guard let self, self.generation == myGeneration else { return }
                         self.onResult?(text, isFinal, nil, startTime, endTime)
+                        if !tokens.isEmpty {
+                            self.onTokens?(tokens, isFinal)
+                        }
                     }
                 }
             } catch {
@@ -206,6 +211,23 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     func stop() {
         generation += 1
         tearDown()
+    }
+
+    /// Extract per-token (character/word-run) text + audio time range from
+    /// SpeechTranscriber's AttributedString. Each run in the attributed string
+    /// can carry an `.audioTimeRange` attribute (CMTimeRange). We emit one
+    /// SpeechToken per run that has a time range attached.
+    nonisolated private static func extractTokens(from attributed: AttributedString) -> [SpeechToken] {
+        var tokens: [SpeechToken] = []
+        for run in attributed.runs {
+            guard let range = run.audioTimeRange else { continue }
+            let runText = String(attributed[run.range].characters)
+            if runText.isEmpty { continue }
+            let start = range.start.seconds
+            let end = (range.start + range.duration).seconds
+            tokens.append(SpeechToken(text: runText, startTime: start, endTime: end))
+        }
+        return tokens
     }
 
     func authorize(completion: @escaping @Sendable (Bool) -> Void) {
