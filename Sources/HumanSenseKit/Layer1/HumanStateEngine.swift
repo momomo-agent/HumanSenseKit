@@ -240,8 +240,13 @@ public class HumanStateEngine {
         // Combined with lip-audio correlation for "is it THIS person speaking?"
         let voiceActive = sttManager.speechDetected || audio.isSpeaking
         let isCorrNow = lipAudioCorrelator.isCorrelated
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15 || lipAudioCorrelator.lipActivity > 0.5
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
+
+        // Instant "is this person speaking" signal for the onset window.
+        // Unlike isCorrelated (needs 500ms warmup), this fires on the first frame.
+        let instantSpeaker = mouthMoving && audio.isSpeaking
 
         // ---- Speech + gaze onset tracker (see field docs above) ----
         let nowTs = ProcessInfo.processInfo.systemUptime
@@ -263,12 +268,12 @@ public class HumanStateEngine {
             if elapsedMs <= Float(onsetWindow * 1000) {
                 // Sample this frame with exponential decay — first frames dominate.
                 let w = expf(-elapsedMs / onsetDecayMs)
-                onsetWeightedCorr += w * (isCorrNow ? 1 : 0)
+                onsetWeightedCorr += w * (instantSpeaker ? 1 : 0)
                 onsetWeightedGaze += w * (lookAt ? 1 : 0)
                 onsetWeightTotal += w
                 onsetFrameCount += 1
                 if lookAt { onsetLookAtCount += 1 }
-                if isCorrNow { onsetCorrCount += 1 }
+                if instantSpeaker { onsetCorrCount += 1 }
                 // Latch speaker verdict as soon as the score crosses threshold.
                 if !onsetIsUserSpeaking, onsetWeightTotal > 0,
                    onsetWeightedCorr / onsetWeightTotal >= onsetThreshold {
