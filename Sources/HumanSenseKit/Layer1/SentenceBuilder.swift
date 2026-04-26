@@ -230,7 +230,26 @@ public class SentenceBuilder {
     /// whenever STT happened to emit a single big chunk. Audio-frame
     /// sampling avoids that aliasing.
     private func speakingToAIScore(for s: Sentence) -> Float {
-        return max(0, min(1, s.onsetGazeScore))
+        // Use per-char gaze spans (updated throughout the sentence) with
+        // exponential decay weighting — early characters matter more.
+        let spans = s.gazeSpans
+        guard !spans.isEmpty else { return 0 }
+        let totalChars = spans.reduce(0) { $0 + $1.charCount }
+        guard totalChars > 0 else { return 0 }
+
+        var score: Float = 0
+        var totalWeight: Float = 0
+        var charIndex = 0
+        for span in spans {
+            for _ in 0..<span.charCount {
+                let t = Float(charIndex) / Float(max(1, totalChars - 1))
+                let w = expf(-gazeDecayLambda * t)
+                score += w * (span.isToScreen ? 1 : 0)
+                totalWeight += w
+                charIndex += 1
+            }
+        }
+        return totalWeight > 0 ? score / totalWeight : 0
     }
 
     // MARK: - Private: Gaze Helpers
