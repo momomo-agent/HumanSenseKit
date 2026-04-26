@@ -123,6 +123,24 @@ public class LipAudioCorrelator {
 
     private var samples: [Sample] = []
 
+    /// Ring buffer of (systemUptime, pearson) for token-level attribution.
+    /// Keeps the last 5s of per-frame Pearson values so TokenAttributor can
+    /// query the correlation at any past moment.
+    public struct PearsonSnapshot {
+        public let timestamp: TimeInterval  // ProcessInfo.systemUptime
+        public let pearson: Float
+    }
+    public private(set) var pearsonHistory: [PearsonSnapshot] = []
+    private let pearsonHistoryDuration: TimeInterval = 5.0
+
+    /// Query average Pearson correlation over a time range (systemUptime).
+    /// Returns 0 if no samples fall in the range.
+    public func averagePearson(from start: TimeInterval, to end: TimeInterval) -> Float {
+        let matching = pearsonHistory.filter { $0.timestamp >= start && $0.timestamp <= end }
+        guard !matching.isEmpty else { return 0 }
+        return matching.map(\.pearson).reduce(0, +) / Float(matching.count)
+    }
+
     public init() {}
 
     // MARK: - Sampling
@@ -203,6 +221,13 @@ public class LipAudioCorrelator {
         // attributed to the user later when STT finally emits text.
         if lipVariance >= 0.0001 && correlation > correlationThreshold {
             lastCorrelatedAt = timestamp
+        }
+
+        // Record Pearson snapshot for token-level attribution
+        pearsonHistory.append(PearsonSnapshot(timestamp: timestamp, pearson: correlation))
+        let historyCutoff = timestamp - pearsonHistoryDuration
+        while let first = pearsonHistory.first, first.timestamp < historyCutoff {
+            pearsonHistory.removeFirst()
         }
     }
 

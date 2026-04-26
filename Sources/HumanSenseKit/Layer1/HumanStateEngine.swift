@@ -97,6 +97,11 @@ public class HumanStateEngine {
             print(dump)
         }
 
+        // Wire token attributor to correlator's Pearson history
+        sttManager.tokenAttributor.queryPearson = { [weak self] start, end in
+            self?.lipAudioCorrelator.averagePearson(from: start, to: end) ?? 0
+        }
+
         setupBindings()
     }
 

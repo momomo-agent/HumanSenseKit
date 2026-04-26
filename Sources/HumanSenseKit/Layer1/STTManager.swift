@@ -63,6 +63,10 @@ public class STTManager: NSObject, ObservableObject {
     private let speech: any SpeechRecognitionBackend
     private let builder = SentenceBuilder()
 
+    /// Token-level attribution engine. Queries correlator Pearson history
+    /// to assign per-token isFromUser confidence.
+    public let tokenAttributor = TokenAttributor()
+
     /// The audio engine. Can be replaced before calling start().
     public var audioEngine: AVAudioEngine {
         get { audio.audioEngine }
@@ -206,12 +210,15 @@ public class STTManager: NSObject, ObservableObject {
 
         speech.onTokens = { [weak self] tokens, isFinal in
             self?.onTokens?(tokens, isFinal)
+            // Feed token attributor
+            self?.tokenAttributor.process(tokens: tokens, isFinal: isFinal)
         }
 
         speech.onFirstBuffer = { [weak self] date in
             // Replace the coarse approximation stamped in start() with the
             // precise moment the analyzer actually consumed its first buffer.
             self?.audioStreamStartTime = date
+            self?.tokenAttributor.audioStreamStartTime = date
         }
 
         speech.onError = { [weak self] error in
