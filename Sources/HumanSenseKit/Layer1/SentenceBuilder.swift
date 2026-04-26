@@ -81,33 +81,19 @@ public class SentenceBuilder {
             // Update existing sentence
             activeSentence?.text = text
 
-            // Sticky upgrade of isFromUser:
+            // isFromUser is — as of 4.9.8 — decided from the *speech onset*
+            // window (the first ~500ms of voice activity, sampled with
+            // exponential decay on the audio-frame timeline). The
+            // SpeechOnsetTracker runs inside HumanStateEngine and latches
+            // isSpeaking at the right moment, so by the time STT emits its
+            // first volatile text, isSpeaking already reflects the onset
+            // verdict. We must NOT upgrade mid-sentence based on later
+            // lipCorrelated blips — glancing at the screen while someone
+            // else speaks would otherwise flip the sentence to user.
             //
-            // lipCorrelator needs ~500ms of samples to warm up and its
-            // 1.5s window means "is this the user speaking?" can flip true
-            // a few hundred ms after the sentence's first volatile text
-            // arrives. If we locked isFromUser at sentence creation we'd
-            // mis-label short utterances ("你好") as ambient because
-            // the correlator hadn't caught up yet.
-            //
-            // Policy: once isSpeaking (or a captured snapshot with
-            // lipCorrelated=true) is observed during the sentence,
-            // upgrade isFromUser to true and keep it there. Also refresh
-            // the signals snapshot so the debug UI reflects the moment
-            // the correlator agreed it was the user.
-            if var active = activeSentence {
-                if isSpeaking && !active.isFromUser {
-                    active.isFromUser = true
-                    if let snap = captureSignals?() { active.signals = snap }
-                } else if !active.isFromUser, let snap = captureSignals?(), snap.lipCorrelated {
-                    // Defensive: if captureSignals sees lipCorrelated even
-                    // when HumanStateEngine hasn't flipped isSpeaking yet
-                    // (e.g. debounce window), trust the correlator.
-                    active.isFromUser = true
-                    active.signals = snap
-                }
-                activeSentence = active
-            }
+            // So: isFromUser and signals are captured once at sentence
+            // creation and stay locked, matching the user's preferred
+            // semantics ("first few chars decide").
 
             // Always update gaze spans so the score reflects the entire
             // sentence — not just sentences that started on-screen.

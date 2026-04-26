@@ -37,6 +37,20 @@ public class HumanStateEngine {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
+    // Speech onset tracker — decides "is this the user speaking?" from the
+    // first ~500ms of voice activity, using exponential decay so the first
+    // few frames dominate. Matches the gaze score semantics: what happens
+    // at the onset of an utterance is what defines it.
+    private let onsetWindow: TimeInterval = 0.5    // sample for 500ms after VAD-on
+    private let onsetDecayMs: Float = 150           // e-fold every 150ms
+    private let onsetThreshold: Float = 0.30        // weighted corr needed to latch user-speaking
+    private var previousVoiceActive: Bool = false
+    private var onsetStart: TimeInterval? = nil    // set when voice rose; nil outside window
+    private var onsetWeightedCorr: Float = 0
+    private var onsetWeightTotal: Float = 0
+    /// Latched verdict for the current speech utterance. Reset on VAD-off.
+    private var onsetIsUserSpeaking: Bool = false
+
     public init(sttBackend: STTManager.BackendType = .speechAnalyzer) {
         self.faceManager = FaceTrackingManager()
         self.audioManager = AudioDetectionManager()
@@ -214,37 +228,69 @@ public class HumanStateEngine {
         // fall back to audio.isSpeaking (RMS threshold).
         // Combined with lip-audio correlation for "is it THIS person speaking?"
         let voiceActive = sttManager.speechDetected || audio.isSpeaking
-        // Don't wait for the correlator to be hot *right now* — short
-        // utterances peak and vanish inside a single sub-window. If we
-        // ever saw correlation in the last ~1s while voice was active,
-        // keep the user-speaking state latched. This mirrors how humans
-        // infer 'someone is talking': we don't need every instant to be
-        // correlated, just that the correlation happened recently.
         let isCorrNow = lipAudioCorrelator.isCorrelated
-        let isCorrRecent = lipAudioCorrelator.wasCorrelated(within: 1.0)
-        let isCorr = isCorrNow || isCorrRecent
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
 
-        // Rate-limited diagnostic log: print the full gate state every ~0.5s.
+        // ---- Speech onset tracker (see field docs above) ----
+        let nowTs = ProcessInfo.processInfo.systemUptime
+        if voiceActive && !previousVoiceActive {
+            // VAD rising edge — start a fresh onset window for this utterance.
+            onsetStart = nowTs
+            onsetWeightedCorr = 0
+            onsetWeightTotal = 0
+            onsetIsUserSpeaking = false
+        }
+
+        if let start = onsetStart {
+            let elapsedMs = Float((nowTs - start) * 1000)
+            if elapsedMs <= Float(onsetWindow * 1000) {
+                // Sample this frame with exponential decay — first frames dominate.
+                let w = expf(-elapsedMs / onsetDecayMs)
+                onsetWeightedCorr += w * (isCorrNow ? 1 : 0)
+                onsetWeightTotal += w
+                // Latch as soon as the weighted score crosses the threshold.
+                if !onsetIsUserSpeaking, onsetWeightTotal > 0,
+                   onsetWeightedCorr / onsetWeightTotal >= onsetThreshold {
+                    onsetIsUserSpeaking = true
+                }
+            } else if !voiceActive {
+                // Utterance ended — keep verdict so late-arriving STT can use it,
+                // but stop sampling. Reset happens on the next rising edge.
+                onsetStart = nil
+            }
+        }
+
+        if !voiceActive {
+            // Gradual reset when voice fades (next rising edge re-arms everything).
+            onsetStart = nil
+        }
+
+        previousVoiceActive = voiceActive
+
+        // ---- Build the user-speaking gate ----
+        // Prefer the onset verdict (captured from the first ~500ms); fall back
+        // to the instantaneous correlator for long utterances where the onset
+        // window has already closed.
+        let isUserSpeaking = voiceActive && (onsetIsUserSpeaking || isCorrNow)
+
+        // Rate-limited diagnostic log: full gate state every ~0.5s.
         let now = Date()
         if now.timeIntervalSince(lastDiagLog) > 0.5 {
+            let onsetScore = onsetWeightTotal > 0 ? onsetWeightedCorr / onsetWeightTotal : 0
             print(String(format:
-                "[HSE] voice=%@ corr=%@[%@](%.2f lipVar=%.4f) lookAt=%@ headFwd=%@ | sttSpeech=%@ audioSpk=%@ mouth=%@",
+                "[HSE] voice=%@ corr=%@(%.2f) onset=%@(%.2f) lookAt=%@ headFwd=%@",
                 voiceActive ? "✓" : "·",
                 isCorrNow ? "✓" : "·",
-                isCorrRecent ? "R" : "·",
                 lipAudioCorrelator.correlation,
-                lipAudioCorrelator.lipVariance,
+                onsetIsUserSpeaking ? "✓" : "·",
+                onsetScore,
                 lookAt ? "✓" : "·",
-                headForward ? "✓" : "·",
-                sttManager.speechDetected ? "✓" : "·",
-                audio.isSpeaking ? "✓" : "·",
-                (abs(face.jawOpen - previousJawOpen) > 0.02 || face.jawOpen > 0.15) ? "✓" : "·"))
+                headForward ? "✓" : "·"))
             lastDiagLog = now
         }
 
-        if voiceActive && isCorr {
+        if isUserSpeaking {
             let toScreen = lookAt && headForward
             return toScreen ? .speakingToScreen : .speakingToOther
         }
