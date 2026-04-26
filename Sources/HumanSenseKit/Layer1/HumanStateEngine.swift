@@ -57,9 +57,9 @@ public class HumanStateEngine {
     /// Weighted gaze score [0,1] for the current utterance (exposed to STT).
     private(set) var onsetGazeScore: Float = 0
     /// Debug counters for the onset window (exposed to UI).
-    private(set) var onsetFrameCount: Int = 0
-    private(set) var onsetLookAtCount: Int = 0
-    private(set) var onsetCorrCount: Int = 0
+    public private(set) var onsetFrameCount: Int = 0
+    public private(set) var onsetLookAtCount: Int = 0
+    public private(set) var onsetCorrCount: Int = 0
 
     public init(sttBackend: STTManager.BackendType = .speechAnalyzer) {
         self.faceManager = FaceTrackingManager()
