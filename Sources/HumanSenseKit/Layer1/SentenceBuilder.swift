@@ -92,20 +92,20 @@ public class SentenceBuilder {
             // Update existing sentence
             activeSentence?.text = text
 
-            // isFromUser is — as of 4.9.8 — decided from the *speech onset*
-            // window (the first ~500ms of voice activity, sampled with
-            // exponential decay on the audio-frame timeline). The
-            // SpeechOnsetTracker runs inside HumanStateEngine and latches
-            // isSpeaking at the right moment, so by the time STT emits its
-            // first volatile text, isSpeaking already reflects the onset
-            // verdict. We must NOT upgrade mid-sentence based on later
-            // lipCorrelated blips — glancing at the screen while someone
-            // else speaks would otherwise flip the sentence to user.
-            //
-            // So: isFromUser and signals are captured once at sentence
-            // creation and stay locked, matching the user's preferred
-            // semantics ("first few chars decide").
-
+            // Late-latch isFromUser: if the sentence was created while the
+            // session hadn't latched yet (correlator still warming up,
+            // first ~500ms), but the session has now latched sessionIsUserSpeaking=true,
+            // upgrade the sentence. This only goes false→true (monotonic),
+            // so stray mid-sentence correlations (e.g. user glances and
+            // briefly speaks while someone else is mid-speech) can't flip
+            // a correctly-identified other-speaker sentence.
+            if activeSentence?.isFromUser == false && isSpeaking {
+                activeSentence?.isFromUser = true
+                // Refresh signals snapshot so UI has accurate score context
+                if let snap = captureSignals?() {
+                    activeSentence?.signals = snap
+                }
+            }
             // Always update gaze spans so the score reflects the entire
             // sentence — not just sentences that started on-screen.
             if addedChars > 0 {

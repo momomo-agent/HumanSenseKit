@@ -236,16 +236,13 @@ public class HumanStateEngine {
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
 
-        // Instant speaker signal — mouth moving + audio. Fires on the first
-        // frame without waiting for lipCorrelator's 500ms warmup. Less
-        // specific than isCorrelated (doesn't confirm lip-audio sync) but
-        // enough to latch "someone is talking AND their mouth is moving".
-        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15 || lipAudioCorrelator.lipActivity > 0.5
-        let instantSpeaker = mouthMoving && audio.isSpeaking
-
         // ---- Speech session tracker ----
-        // Judge "is THIS person speaking?" from the moment voice starts,
-        // latched for the session's lifetime.
+        // Judge "is THIS person speaking?" by observing correlation between
+        // the user's lip movement and microphone audio over the session's
+        // lifetime. Only lipCorrelator.isCorrelated can distinguish "user
+        // speaking" from "someone else speaking while user's mouth happens
+        // to move" (yawn, smile, chew). We intentionally do NOT use
+        // instantSpeaker (mouth + audio) because audio may be someone else.
         if voiceActive && !previousVoiceActive {
             // Voice rising edge — start a fresh session.
             sessionActive = true
@@ -257,12 +254,11 @@ public class HumanStateEngine {
         if sessionActive {
             sessionFrameCount += 1
             if lookAt { sessionLookAtCount += 1 }
-            // Latch as soon as EITHER signal confirms user speech:
-            //   - instantSpeaker: immediate (mouth moving + audio), active from frame 0
-            //   - isCorrNow: stronger signal but needs ~500ms warmup
-            // This lets STT (arriving at ~400ms) read a correct verdict even
-            // before the correlator warms up.
-            if instantSpeaker || isCorrNow {
+            // Only latch on correlation — the only signal that can tell
+            // "user speaking" from "someone else speaking". Needs ~500ms
+            // warmup; STT arriving at ~400ms may read false, but sentence
+            // can upgrade later via wasCorrelated lookback.
+            if isCorrNow {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true  // latch once true
             }
@@ -278,9 +274,11 @@ public class HumanStateEngine {
         previousVoiceActive = voiceActive
 
         // ---- Build the user-speaking gate ----
-        // Prefer the session-latched verdict; fall back to the instantaneous
-        // correlator for the first frames before correlator has warmed up.
-        let isUserSpeaking = voiceActive && (sessionIsUserSpeaking || isCorrNow)
+        // Prefer the session-latched verdict. The correlator is the only
+        // signal that reliably distinguishes user from others; do not fall
+        // back on instantaneous jaw+audio (that fires on bystander speech
+        // when user's mouth happens to move).
+        let isUserSpeaking = voiceActive && sessionIsUserSpeaking
 
         // Rate-limited diagnostic log.
         let now = Date()
