@@ -122,11 +122,15 @@ public class STTManager: NSObject, ObservableObject {
                 return
             }
             Task { @MainActor in
-                self?.audioStreamStartTime = Date()
                 self?.lastError = nil
                 self?.wireUp()
                 self?.audio.start()
                 self?.speech.startTask()
+                // Stamp audioStreamStartTime right after startTask — the analyzer
+                // timeline begins from the first buffer it consumes, which is
+                // approximately now (within a few ms), not when STT.start() was
+                // invoked (that can be seconds earlier due to auth/model download).
+                self?.audioStreamStartTime = Date()
                 self?.builder.resetActive()
                 self?.isListening = true
             }
