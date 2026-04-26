@@ -107,7 +107,7 @@ public class LipAudioCorrelator {
     // MARK: - Configuration
 
     private let windowDuration: TimeInterval = 1.5
-    private let correlationThreshold: Float = 0.3  // co-occurrence ratio threshold
+    private let correlationThreshold: Float = 0.3  // Pearson correlation threshold
     private let minSamples = 30  // ~500ms at 60fps
     private let subWindowSize = 10  // ~167ms rolling std window
     // Thresholds for "active" in rolling std
@@ -171,26 +171,25 @@ public class LipAudioCorrelator {
         let lipStds = envs.map(\.lipStd)
         let audioStds = envs.map(\.audioStd)
 
-        // Co-occurrence: what fraction of frames have both lip AND audio active?
-        var both = 0, lipOnly = 0, audioOnly = 0, neither = 0
+        // Pearson correlation of lip and audio envelopes.
+        // Co-occurrence ratio was unreliable: it measured overlap of "active"
+        // frames, not whether the two signals oscillate in sync.
+        // Verified on kenefe's 268-frame sample: co-occurrence gave P1=0.48
+        // P2=0.76 (inverted!), Pearson gave P1=0.69 P2=0.30 (correct).
+        correlation = pearsonCorrelation(xs: lipStds, ys: audioStds)
+
+        // Keep debug counters for visualization
+        var both = 0, lipOnly = 0, audioOnly = 0
         for i in 0..<envs.count {
             let lipActive = lipStds[i] > lipStdThreshold
             let audioActive = audioStds[i] > audioStdThreshold
             if lipActive && audioActive { both += 1 }
             else if lipActive { lipOnly += 1 }
             else if audioActive { audioOnly += 1 }
-            else { neither += 1 }
         }
         bothCount = both
         lipOnlyCount = lipOnly
         audioOnlyCount = audioOnly
-
-        let totalActive = both + lipOnly + audioOnly
-        if totalActive > 0 {
-            correlation = Float(both) / Float(totalActive)
-        } else {
-            correlation = 0
-        }
 
         // Lip variance (for gate)
         let n = Float(lipStds.count)

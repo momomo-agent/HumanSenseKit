@@ -73,7 +73,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
 
         let transcriber = SpeechTranscriber(
             locale: Locale(identifier: "zh-CN"),
-            preset: .progressiveTranscription
+            preset: .timeIndexedProgressiveTranscription
         )
         self.transcriber = transcriber
 
