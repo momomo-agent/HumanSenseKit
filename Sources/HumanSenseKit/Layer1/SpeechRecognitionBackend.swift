@@ -8,6 +8,7 @@ import AVFoundation
 protocol SpeechRecognitionBackend: AnyObject {
     var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?, _ audioStartTime: Double?, _ audioEndTime: Double?) -> Void)? { get set }
     var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)? { get set }
+    var onFirstBuffer: ((Date) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer)
     func startTask()

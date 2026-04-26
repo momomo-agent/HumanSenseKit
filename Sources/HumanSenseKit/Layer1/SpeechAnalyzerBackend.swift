@@ -28,6 +28,12 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     // nonisolated(unsafe) — written on MainActor, read from audio thread
     nonisolated(unsafe) private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     nonisolated(unsafe) private var analyzerFormat: AVAudioFormat?
+    /// Set once when the first audio buffer is actually yielded to the
+    /// analyzer's input stream. This is the true t=0 of analyzer-relative
+    /// CMTime offsets, so callers use this (not STTManager.start() time)
+    /// to convert audio offsets to wall-clock.
+    nonisolated(unsafe) private var firstBufferWallTime: Date?
+    var onFirstBuffer: ((Date) -> Void)?
 
     /// Contextual strings to improve recognition accuracy.
     /// Set before calling startTask().
@@ -43,6 +49,15 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
         guard let format = analyzerFormat else {
             // Format not yet known — drop buffer to avoid sending Float32 to analyzer
             return
+        }
+        // Stamp t=0 on the very first buffer we actually yield — this is
+        // the true analyzer-relative origin for wall-clock conversion.
+        if firstBufferWallTime == nil {
+            let now = Date()
+            firstBufferWallTime = now
+            // Hop to main actor to publish without capturing self
+            let callback = onFirstBuffer
+            Task { @MainActor in callback?(now) }
         }
         if buffer.format == format {
             continuation.yield(AnalyzerInput(buffer: buffer))
@@ -70,6 +85,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
         let myGeneration = generation
         tearDown()
 
+        firstBufferWallTime = nil
         print("[Speech] startTask gen=\(myGeneration)")
 
         let transcriber = SpeechTranscriber(

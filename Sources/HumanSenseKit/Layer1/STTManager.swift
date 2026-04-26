@@ -201,6 +201,12 @@ public class STTManager: NSObject, ObservableObject {
             self?.onTokens?(tokens, isFinal)
         }
 
+        speech.onFirstBuffer = { [weak self] date in
+            // Replace the coarse approximation stamped in start() with the
+            // precise moment the analyzer actually consumed its first buffer.
+            self?.audioStreamStartTime = date
+        }
+
         speech.onError = { [weak self] error in
             self?.lastError = error.localizedDescription
             self?.builder.finalizeAndReset()
