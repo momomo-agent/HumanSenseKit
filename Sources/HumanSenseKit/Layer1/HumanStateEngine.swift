@@ -56,6 +56,10 @@ public class HumanStateEngine {
     private var onsetIsUserSpeaking: Bool = false
     /// Weighted gaze score [0,1] for the current utterance (exposed to STT).
     private(set) var onsetGazeScore: Float = 0
+    /// Debug counters for the onset window (exposed to UI).
+    private(set) var onsetFrameCount: Int = 0
+    private(set) var onsetLookAtCount: Int = 0
+    private(set) var onsetCorrCount: Int = 0
 
     public init(sttBackend: STTManager.BackendType = .speechAnalyzer) {
         self.faceManager = FaceTrackingManager()
@@ -249,6 +253,9 @@ public class HumanStateEngine {
             onsetWeightTotal = 0
             onsetIsUserSpeaking = false
             onsetGazeScore = 0
+            onsetFrameCount = 0
+            onsetLookAtCount = 0
+            onsetCorrCount = 0
         }
 
         if let start = onsetStart {
@@ -259,6 +266,9 @@ public class HumanStateEngine {
                 onsetWeightedCorr += w * (isCorrNow ? 1 : 0)
                 onsetWeightedGaze += w * (lookAt ? 1 : 0)
                 onsetWeightTotal += w
+                onsetFrameCount += 1
+                if lookAt { onsetLookAtCount += 1 }
+                if isCorrNow { onsetCorrCount += 1 }
                 // Latch speaker verdict as soon as the score crosses threshold.
                 if !onsetIsUserSpeaking, onsetWeightTotal > 0,
                    onsetWeightedCorr / onsetWeightTotal >= onsetThreshold {
