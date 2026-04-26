@@ -101,6 +101,13 @@ public class HumanStateEngine {
         sttManager.tokenAttributor.queryPearson = { [weak self] start, end in
             self?.lipAudioCorrelator.averagePearson(from: start, to: end) ?? 0
         }
+        sttManager.tokenAttributor.queryFeatures = { [weak self] start, end in
+            self?.lipAudioCorrelator.features(from: start, to: end)
+                ?? LipAudioCorrelator.TokenFeatures(
+                    avgPearson: 0, maxPearson: 0, jawStd: 0, jawPeakRate: 0,
+                    faceVisibleRatio: 0, sampleCount: 0
+                )
+        }
 
         setupBindings()
     }
@@ -232,7 +239,7 @@ public class HumanStateEngine {
             mouthStretchLeft: face.mouthStretchLeft,
             mouthStretchRight: face.mouthStretchRight
         )
-        lipAudioCorrelator.addSample(face: lipFrame, audioRMS: audio.volume)
+        lipAudioCorrelator.addSample(face: lipFrame, audioRMS: audio.volume, faceVisible: face.faceDetected)
 
         // Speech detection: use Apple's SpeechDetector (ML-based VAD) when available,
         // fall back to audio.isSpeaking (RMS threshold).

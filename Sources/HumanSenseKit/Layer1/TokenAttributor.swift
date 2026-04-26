@@ -2,25 +2,32 @@
 import Foundation
 
 /// Assigns per-token "isFromUser" confidence by querying the correlator's
-/// Pearson history at each token's audio time range, then applies median
-/// smoothing and gap-bridging to produce clean user-speech runs.
+/// history at each token's audio time range, then applies:
+///  1. Multi-signal confidence (Pearson + jaw peak rate + jaw std)
+///  2. Median smoothing to kill spike noise
+///  3. Gap bridging to ignore 1-2 token dropouts
+///  4. **Sentence-level majority vote** — if the sentence is dominantly
+///     the user, fill in the edges and middle dips (boundary & gap recovery)
 ///
-/// The output is a list of `AttributedRun`s — contiguous spans of text that
-/// belong to the same speaker (user vs other). The demo displays these as
-/// the reconstructed "sentence the user said to the screen."
+/// The output is the reconstructed `userSentence`: what we think the user
+/// actually said to the screen, even when a few characters fell below the
+/// instantaneous Pearson threshold (cold start, side profile, brief head turn).
 @MainActor
 public class TokenAttributor {
 
     // MARK: - Types
 
-    /// A single token with its attribution confidence.
+    /// A single token with its attribution confidence + feature bundle.
     public struct AttributedToken {
         public let text: String
-        public let audioStart: Double   // seconds relative to audio stream
+        public let audioStart: Double
         public let audioEnd: Double
-        public let rawConfidence: Float  // Pearson avg over token's time range
-        public let smoothedConfidence: Float  // after median filter
-        public let isUser: Bool         // smoothed >= threshold
+        public let rawConfidence: Float        // base Pearson
+        public let fusedConfidence: Float      // Pearson + jaw signals fused
+        public let smoothedConfidence: Float   // median filter
+        public let isUser: Bool                // final verdict
+        public let filledBySentence: Bool      // upgraded by sentence vote
+        public let features: LipAudioCorrelator.TokenFeatures
     }
 
     /// A contiguous run of tokens from the same speaker.
@@ -32,104 +39,208 @@ public class TokenAttributor {
         public let tokens: [AttributedToken]
     }
 
+    /// Sentence-level aggregate verdict.
+    public struct SentenceVerdict {
+        public let userTokenRatio: Float        // count(isUser) / total
+        public let peakConfidence: Float        // max smoothedConfidence
+        public let longestUserSpan: Float       // longest contiguous user run / total
+        public let isUserDominant: Bool
+    }
+
     // MARK: - Configuration
 
-    /// Pearson threshold for "user speaking"
     public var confidenceThreshold: Float = 0.3
-
-    /// Median filter window (must be odd)
     public var medianWindow: Int = 3
-
-    /// Max consecutive non-user tokens to bridge over
     public var maxGap: Int = 2
+
+    /// Sentence vote thresholds — if any two trigger, the sentence is "yours"
+    public var sentenceUserRatioThreshold: Float = 0.5
+    public var sentencePeakThreshold: Float = 0.45
+    public var sentenceSpanThreshold: Float = 0.35
 
     // MARK: - Dependencies
 
-    /// Called to query Pearson history. Set by STTManager/HumanStateEngine.
+    /// Closure to query rich features from the correlator.
+    public var queryFeatures: ((_ wallStart: TimeInterval, _ wallEnd: TimeInterval) -> LipAudioCorrelator.TokenFeatures)?
+
+    /// Fallback closure (Pearson-only) for backwards compat.
     public var queryPearson: ((_ wallStart: TimeInterval, _ wallEnd: TimeInterval) -> Float)?
 
-    /// Audio stream start time (wall clock). Set when STTManager stamps it.
+    /// Audio stream start time (wall clock).
     public var audioStreamStartTime: Date?
 
     // MARK: - State
 
-    /// Latest attributed tokens (updated on each onTokens call)
     public private(set) var currentTokens: [AttributedToken] = []
-
-    /// Latest attributed runs (user speech segments)
     public private(set) var currentRuns: [AttributedRun] = []
-
-    /// The reconstructed user sentence (gap-bridged, user tokens only)
     public private(set) var userSentence: String = ""
+    public private(set) var lastVerdict: SentenceVerdict = .init(
+        userTokenRatio: 0, peakConfidence: 0, longestUserSpan: 0, isUserDominant: false
+    )
 
     public init() {}
 
     // MARK: - Public API
 
-    /// Process a batch of tokens from SpeechAnalyzer.
-    /// Call this from STTManager.onTokens.
     public func process(tokens: [SpeechToken], isFinal: Bool) {
-        guard let startTime = audioStreamStartTime,
-              let query = queryPearson else {
-            // Can't attribute without timing info
-            currentTokens = tokens.map {
-                AttributedToken(text: $0.text, audioStart: $0.startTime, audioEnd: $0.endTime,
-                                rawConfidence: 0, smoothedConfidence: 0, isUser: false)
-            }
-            currentRuns = [AttributedRun(text: tokens.map(\.text).joined(), isUser: false, avgConfidence: 0, tokens: currentTokens)]
-            userSentence = ""
+        guard let startTime = audioStreamStartTime else {
+            fallbackEmpty(tokens: tokens)
             return
         }
 
-        // Step 1: Raw confidence — query Pearson history for each token's time range
-        let rawConfidences: [Float] = tokens.map { token in
+        // Convert Date → systemUptime offset
+        let now = Date()
+        let offset = now.timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
+
+        // Step 1: gather per-token features
+        let tokenFeatures: [LipAudioCorrelator.TokenFeatures] = tokens.map { token in
             let wallStart = startTime.timeIntervalSince1970 + token.startTime
             let wallEnd = startTime.timeIntervalSince1970 + token.endTime
-            // Convert to systemUptime: we need the offset between Date and systemUptime
-            // systemUptime ≈ ProcessInfo.processInfo.systemUptime
-            // Date.timeIntervalSince1970 ≈ Date().timeIntervalSince1970
-            // offset = Date().timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
-            let now = Date()
-            let offset = now.timeIntervalSince1970 - ProcessInfo.processInfo.systemUptime
             let uptimeStart = wallStart - offset
             let uptimeEnd = wallEnd - offset
-            return query(uptimeStart, uptimeEnd)
-        }
-
-        // Step 2: Median filter
-        let smoothed = medianFilter(rawConfidences, window: medianWindow)
-
-        // Step 3: Build attributed tokens
-        currentTokens = zip(tokens, zip(rawConfidences, smoothed)).map { token, confs in
-            AttributedToken(
-                text: token.text,
-                audioStart: token.startTime,
-                audioEnd: token.endTime,
-                rawConfidence: confs.0,
-                smoothedConfidence: confs.1,
-                isUser: confs.1 >= confidenceThreshold
+            if let qf = queryFeatures {
+                return qf(uptimeStart, uptimeEnd)
+            }
+            if let qp = queryPearson {
+                let p = qp(uptimeStart, uptimeEnd)
+                return LipAudioCorrelator.TokenFeatures(
+                    avgPearson: p, maxPearson: p, jawStd: 0, jawPeakRate: 0,
+                    faceVisibleRatio: 1, sampleCount: 0
+                )
+            }
+            return LipAudioCorrelator.TokenFeatures(
+                avgPearson: 0, maxPearson: 0, jawStd: 0, jawPeakRate: 0,
+                faceVisibleRatio: 0, sampleCount: 0
             )
         }
 
-        // Step 4: Gap bridge + build runs
-        let bridged = gapBridge(currentTokens, maxGap: maxGap)
-        currentRuns = buildRuns(from: bridged)
+        // Step 2: fuse signals into confidence
+        let fused = tokenFeatures.map { fuseConfidence($0) }
+        let raw = tokenFeatures.map { $0.avgPearson }
 
-        // Step 5: Extract user sentence
-        userSentence = currentRuns
-            .filter(\.isUser)
-            .map(\.text)
-            .joined()
+        // Step 3: median smooth
+        let smoothed = medianFilter(fused, window: medianWindow)
+
+        // Step 4: initial per-token verdict
+        var isUserArr = smoothed.map { $0 >= confidenceThreshold }
+
+        // Step 5: gap bridge (short non-user runs between user tokens)
+        isUserArr = gapBridge(isUserArr, maxGap: maxGap)
+
+        // Step 6: sentence-level majority vote
+        let verdict = computeVerdict(isUserArr: isUserArr, smoothed: smoothed)
+        lastVerdict = verdict
+
+        var filledBySentence = Array(repeating: false, count: tokens.count)
+        if verdict.isUserDominant {
+            // Fill in the gaps — all tokens in the sentence become user.
+            // This recovers cold-start head, tail droop, and mid-sentence dips.
+            for i in isUserArr.indices where !isUserArr[i] {
+                // Don't upgrade tokens with clearly non-user signal
+                // (very low raw + low fused + face not visible at all)
+                let f = tokenFeatures[i]
+                let clearlyNotUser = raw[i] < -0.1 && f.faceVisibleRatio < 0.2
+                if !clearlyNotUser {
+                    isUserArr[i] = true
+                    filledBySentence[i] = true
+                }
+            }
+        }
+
+        // Step 7: build AttributedTokens
+        currentTokens = tokens.indices.map { i in
+            AttributedToken(
+                text: tokens[i].text,
+                audioStart: tokens[i].startTime,
+                audioEnd: tokens[i].endTime,
+                rawConfidence: raw[i],
+                fusedConfidence: fused[i],
+                smoothedConfidence: smoothed[i],
+                isUser: isUserArr[i],
+                filledBySentence: filledBySentence[i],
+                features: tokenFeatures[i]
+            )
+        }
+
+        // Step 8: build runs + reconstruct userSentence
+        currentRuns = buildRuns(from: currentTokens)
+        userSentence = currentRuns.filter(\.isUser).map(\.text).joined()
     }
 
-    /// Reset state (e.g. when STT restarts)
     public func reset() {
         currentTokens = []
         currentRuns = []
         userSentence = ""
+        lastVerdict = .init(userTokenRatio: 0, peakConfidence: 0, longestUserSpan: 0, isUserDominant: false)
     }
 
-    // MARK: - Private: Median Filter
+    // MARK: - Signal fusion
+
+    /// Combine Pearson + jaw peak rate + jaw std into a single confidence.
+    /// The Pearson is the main signal; jaw signals act as:
+    ///  - boost during Pearson cold-start (first ~500ms of speaking)
+    ///  - penalty when audio is active but mouth isn't moving (someone else speaking)
+    private func fuseConfidence(_ f: LipAudioCorrelator.TokenFeatures) -> Float {
+        var score = f.avgPearson
+
+        // Boost if jaw peak rate is in the speech band (3-8 Hz)
+        if f.jawPeakRate >= 3 && f.jawPeakRate <= 8 {
+            score += 0.15
+        }
+
+        // Boost from max Pearson (catches brief strong alignment even if avg is noisy)
+        if f.maxPearson > 0.5 {
+            score += 0.05 * min(1, (f.maxPearson - 0.5) / 0.3)
+        }
+
+        // Penalty: jaw barely moving but we have a token (someone else is speaking)
+        if f.jawStd < 0.005 && f.faceVisibleRatio > 0.5 {
+            score -= 0.3
+        }
+
+        // If face wasn't visible, don't over-penalize — leave confidence ambiguous
+        // so the sentence-level vote can decide.
+        if f.faceVisibleRatio < 0.3 {
+            score = max(score, 0)  // floor at 0, don't let penalties drive it negative
+        }
+
+        return max(-1, min(1, score))
+    }
+
+    // MARK: - Verdict
+
+    private func computeVerdict(isUserArr: [Bool], smoothed: [Float]) -> SentenceVerdict {
+        guard !isUserArr.isEmpty else {
+            return .init(userTokenRatio: 0, peakConfidence: 0, longestUserSpan: 0, isUserDominant: false)
+        }
+        let userCount = isUserArr.filter { $0 }.count
+        let ratio = Float(userCount) / Float(isUserArr.count)
+        let peak = smoothed.max() ?? 0
+
+        // longest contiguous user run
+        var longest = 0, cur = 0
+        for b in isUserArr {
+            if b { cur += 1; longest = max(longest, cur) }
+            else { cur = 0 }
+        }
+        let spanRatio = Float(longest) / Float(isUserArr.count)
+
+        // Trigger any two
+        let ratioHit = ratio >= sentenceUserRatioThreshold
+        let peakHit = peak >= sentencePeakThreshold
+        let spanHit = spanRatio >= sentenceSpanThreshold
+        let hits = [ratioHit, peakHit, spanHit].filter { $0 }.count
+        let dominant = hits >= 2
+
+        return .init(
+            userTokenRatio: ratio,
+            peakConfidence: peak,
+            longestUserSpan: spanRatio,
+            isUserDominant: dominant
+        )
+    }
+
+    // MARK: - Median filter
 
     private func medianFilter(_ values: [Float], window: Int) -> [Float] {
         guard values.count >= window else { return values }
@@ -143,43 +254,26 @@ public class TokenAttributor {
         }
     }
 
-    // MARK: - Private: Gap Bridge
+    // MARK: - Gap bridge
 
-    /// If a short run of non-user tokens (≤ maxGap) is surrounded by user
-    /// tokens on both sides, flip them to user (bridge the gap).
-    private func gapBridge(_ tokens: [AttributedToken], maxGap: Int) -> [AttributedToken] {
-        guard tokens.count > 2 else { return tokens }
-        var result = tokens
-
+    private func gapBridge(_ isUser: [Bool], maxGap: Int) -> [Bool] {
+        guard isUser.count > 2 else { return isUser }
+        var result = isUser
         var i = 0
         while i < result.count {
-            if result[i].isUser {
-                i += 1
-                continue
-            }
-            // Found a non-user token. Count the gap length.
+            if result[i] { i += 1; continue }
             var gapEnd = i
-            while gapEnd < result.count && !result[gapEnd].isUser {
-                gapEnd += 1
-            }
+            while gapEnd < result.count && !result[gapEnd] { gapEnd += 1 }
             let gapLen = gapEnd - i
-            // Bridge if gap is short AND there's a user token on both sides
-            if gapLen <= maxGap && i > 0 && result[i - 1].isUser && gapEnd < result.count && result[gapEnd].isUser {
-                for j in i..<gapEnd {
-                    let t = result[j]
-                    result[j] = AttributedToken(
-                        text: t.text, audioStart: t.audioStart, audioEnd: t.audioEnd,
-                        rawConfidence: t.rawConfidence, smoothedConfidence: t.smoothedConfidence,
-                        isUser: true  // bridged
-                    )
-                }
+            if gapLen <= maxGap && i > 0 && result[i - 1] && gapEnd < result.count && result[gapEnd] {
+                for j in i..<gapEnd { result[j] = true }
             }
             i = gapEnd
         }
         return result
     }
 
-    // MARK: - Private: Build Runs
+    // MARK: - Build runs
 
     private func buildRuns(from tokens: [AttributedToken]) -> [AttributedRun] {
         guard !tokens.isEmpty else { return [] }
@@ -204,6 +298,23 @@ public class TokenAttributor {
         let text = tokens.map(\.text).joined()
         let avg = tokens.isEmpty ? 0 : tokens.map(\.smoothedConfidence).reduce(0, +) / Float(tokens.count)
         return AttributedRun(text: text, isUser: isUser, avgConfidence: avg, tokens: tokens)
+    }
+
+    // MARK: - Fallbacks
+
+    private func fallbackEmpty(tokens: [SpeechToken]) {
+        let empty = LipAudioCorrelator.TokenFeatures(
+            avgPearson: 0, maxPearson: 0, jawStd: 0, jawPeakRate: 0, faceVisibleRatio: 0, sampleCount: 0
+        )
+        currentTokens = tokens.map {
+            AttributedToken(
+                text: $0.text, audioStart: $0.startTime, audioEnd: $0.endTime,
+                rawConfidence: 0, fusedConfidence: 0, smoothedConfidence: 0,
+                isUser: false, filledBySentence: false, features: empty
+            )
+        }
+        currentRuns = [AttributedRun(text: tokens.map(\.text).joined(), isUser: false, avgConfidence: 0, tokens: currentTokens)]
+        userSentence = ""
     }
 }
 #endif

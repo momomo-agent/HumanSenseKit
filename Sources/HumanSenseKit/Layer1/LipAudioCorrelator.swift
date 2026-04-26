@@ -129,9 +129,21 @@ public class LipAudioCorrelator {
     public struct PearsonSnapshot {
         public let timestamp: TimeInterval  // ProcessInfo.systemUptime
         public let pearson: Float
+        public let jawOpen: Float         // raw jaw blendshape
+        public let faceVisible: Bool      // was the face detected this frame
     }
     public private(set) var pearsonHistory: [PearsonSnapshot] = []
     private let pearsonHistoryDuration: TimeInterval = 5.0
+
+    /// Per-token feature bundle derived from a time range of history.
+    public struct TokenFeatures {
+        public let avgPearson: Float      // average Pearson over range
+        public let maxPearson: Float      // best Pearson in range
+        public let jawStd: Float          // std of jawOpen (mouth moving amount)
+        public let jawPeakRate: Float     // local maxima / sec (syllable rate)
+        public let faceVisibleRatio: Float // fraction of frames face was detected
+        public let sampleCount: Int
+    }
 
     /// Query average Pearson correlation over a time range (systemUptime).
     /// Returns 0 if no samples fall in the range.
@@ -141,11 +153,49 @@ public class LipAudioCorrelator {
         return matching.map(\.pearson).reduce(0, +) / Float(matching.count)
     }
 
+    /// Compute rich token features over a time range.
+    public func features(from start: TimeInterval, to end: TimeInterval) -> TokenFeatures {
+        let matching = pearsonHistory.filter { $0.timestamp >= start && $0.timestamp <= end }
+        guard !matching.isEmpty else {
+            return TokenFeatures(avgPearson: 0, maxPearson: 0, jawStd: 0, jawPeakRate: 0, faceVisibleRatio: 0, sampleCount: 0)
+        }
+        let pearsons = matching.map(\.pearson)
+        let jaws = matching.map(\.jawOpen)
+        let visibles = matching.map { $0.faceVisible ? Float(1) : Float(0) }
+
+        // std of jawOpen
+        let mean = jaws.reduce(0, +) / Float(jaws.count)
+        let variance = jaws.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Float(jaws.count)
+        let std = sqrt(variance)
+
+        // jaw peak count: local maxima above mean + 0.3*std
+        var peaks = 0
+        if jaws.count >= 3 {
+            let threshold = mean + 0.3 * std
+            for i in 1..<(jaws.count - 1) {
+                if jaws[i] > jaws[i - 1] && jaws[i] >= jaws[i + 1] && jaws[i] > threshold {
+                    peaks += 1
+                }
+            }
+        }
+        let duration = max(0.05, end - start)
+        let peakRate = Float(peaks) / Float(duration)
+
+        return TokenFeatures(
+            avgPearson: pearsons.reduce(0, +) / Float(pearsons.count),
+            maxPearson: pearsons.max() ?? 0,
+            jawStd: std,
+            jawPeakRate: peakRate,
+            faceVisibleRatio: visibles.reduce(0, +) / Float(visibles.count),
+            sampleCount: matching.count
+        )
+    }
+
     public init() {}
 
     // MARK: - Sampling
 
-    public func addSample(face: LipFrame, audioRMS: Float, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+    public func addSample(face: LipFrame, audioRMS: Float, faceVisible: Bool = true, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         let activity = face.jawOpen * 2.0
                      + face.mouthFunnel
                      + face.mouthPucker
@@ -224,7 +274,12 @@ public class LipAudioCorrelator {
         }
 
         // Record Pearson snapshot for token-level attribution
-        pearsonHistory.append(PearsonSnapshot(timestamp: timestamp, pearson: correlation))
+        pearsonHistory.append(PearsonSnapshot(
+            timestamp: timestamp,
+            pearson: correlation,
+            jawOpen: face.jawOpen,
+            faceVisible: faceVisible
+        ))
         let historyCutoff = timestamp - pearsonHistoryDuration
         while let first = pearsonHistory.first, first.timestamp < historyCutoff {
             pearsonHistory.removeFirst()
