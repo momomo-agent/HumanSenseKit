@@ -236,6 +236,13 @@ public class HumanStateEngine {
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
 
+        // Instant speaker signal — mouth moving + audio. Fires on the first
+        // frame without waiting for lipCorrelator's 500ms warmup. Less
+        // specific than isCorrelated (doesn't confirm lip-audio sync) but
+        // enough to latch "someone is talking AND their mouth is moving".
+        let mouthMoving = jawDelta > 0.02 || face.jawOpen > 0.15 || lipAudioCorrelator.lipActivity > 0.5
+        let instantSpeaker = mouthMoving && audio.isSpeaking
+
         // ---- Speech session tracker ----
         // Judge "is THIS person speaking?" from the moment voice starts,
         // latched for the session's lifetime.
@@ -250,7 +257,12 @@ public class HumanStateEngine {
         if sessionActive {
             sessionFrameCount += 1
             if lookAt { sessionLookAtCount += 1 }
-            if isCorrNow {
+            // Latch as soon as EITHER signal confirms user speech:
+            //   - instantSpeaker: immediate (mouth moving + audio), active from frame 0
+            //   - isCorrNow: stronger signal but needs ~500ms warmup
+            // This lets STT (arriving at ~400ms) read a correct verdict even
+            // before the correlator warms up.
+            if instantSpeaker || isCorrNow {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true  // latch once true
             }
