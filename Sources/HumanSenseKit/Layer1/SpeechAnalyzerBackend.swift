@@ -33,7 +33,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     /// CMTime offsets, so callers use this (not STTManager.start() time)
     /// to convert audio offsets to wall-clock.
     nonisolated(unsafe) private var firstBufferWallTime: Date?
-    var onFirstBuffer: ((Date) -> Void)?
+    nonisolated(unsafe) var onFirstBuffer: ((Date) -> Void)?
 
     /// Contextual strings to improve recognition accuracy.
     /// Set before calling startTask().
