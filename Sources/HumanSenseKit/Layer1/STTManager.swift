@@ -39,8 +39,10 @@ public class STTManager: NSObject, ObservableObject {
         }
     }
 
-    /// Called when a sentence is finalized — for debug logging.
-    public var onSentenceFinalized: ((_ text: String) -> Void)?
+    /// Wall-clock time when the audio stream started (when start() was called).
+    /// Use this to convert audio-relative CMTime offsets to system time:
+    /// systemTime = audioStreamStartTime + audioOffset
+    public private(set) var audioStreamStartTime: Date?
 
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
@@ -112,6 +114,7 @@ public class STTManager: NSObject, ObservableObject {
                 return
             }
             Task { @MainActor in
+                self?.audioStreamStartTime = Date()
                 self?.lastError = nil
                 self?.wireUp()
                 self?.audio.start()
