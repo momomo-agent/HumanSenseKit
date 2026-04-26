@@ -284,6 +284,10 @@ public class HumanStateEngine {
                 // emits text.
                 if onsetWeightTotal > 0 {
                     onsetGazeScore = onsetWeightedGaze / onsetWeightTotal
+                    sttManager.onsetGazeScore = onsetGazeScore
+                    sttManager.onsetFrameCount = onsetFrameCount
+                    sttManager.onsetLookAtCount = onsetLookAtCount
+                    sttManager.onsetCorrCount = onsetCorrCount
                 }
             } else if !voiceActive {
                 // Utterance ended — keep verdict so late-arriving STT can use it,

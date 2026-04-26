@@ -82,6 +82,9 @@ public class STTManager: NSObject, ObservableObject {
     @Published public var onsetGazeScore: Float = 0 {
         didSet { builder.onsetGazeScore = onsetGazeScore }
     }
+    @Published public var onsetFrameCount: Int = 0
+    @Published public var onsetLookAtCount: Int = 0
+    @Published public var onsetCorrCount: Int = 0
 
     public func captureSpeechStartState() {}
 
