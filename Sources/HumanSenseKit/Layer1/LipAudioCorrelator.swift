@@ -95,7 +95,13 @@ public class LipAudioCorrelator {
     // MARK: - Configuration
 
     private let windowDuration: TimeInterval = 1.5
-    private let correlationThreshold: Float = 0.3  // co-occurrence ratio threshold
+    // Co-occurrence ratio threshold. Lower = more permissive.
+    // Was 0.3 (too strict on iPhone Air / voiceChat mode where AEC + noise
+    // suppression often leaves brief audio-only gaps and lip std dips below
+    // the threshold). 0.15 lets users pass when roughly 1/6 of frames show
+    // joint lip+audio activity, which matches real near-field speech where
+    // mouth opening doesn't always line up sample-by-sample with audio peaks.
+    private let correlationThreshold: Float = 0.15
     private let minSamples = 30  // ~500ms at 60fps
     private let subWindowSize = 10  // ~167ms rolling std window
     // Thresholds for "active" in rolling std
