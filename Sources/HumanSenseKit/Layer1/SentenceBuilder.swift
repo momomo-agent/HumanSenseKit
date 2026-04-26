@@ -37,6 +37,12 @@ public class SentenceBuilder {
     private var lastCharCount: Int = 0
     private var speechStartCaptured: Bool = false
 
+    /// Exponential decay rate for "talking-to-AI" scoring.
+    /// λ=0.5: char 0 weight=1.0, char 3 ≈20%, char 5 ≈8%, char 10 ≈0.7%.
+    /// The first 3-5 characters dominate — matches the intuition that users
+    /// turn their gaze to the screen near the start of an utterance.
+    private let gazeDecayLambda: Float = 0.5
+
     // External inputs
     var isLookingAtScreen: Bool = false
     var isSpeaking: Bool = false
@@ -133,10 +139,13 @@ public class SentenceBuilder {
     // MARK: - Private: Segment Building
 
     private func appendSentence(_ s: Sentence, to result: inout [SpeechSegment]) {
+        let score = speakingToAIScore(for: s)
+
         if !result.isEmpty {
             result.append(SpeechSegment(
                 text: " ", isToScreen: false,
                 sentenceStartedLookingAtScreen: s.startedLookingAtScreen,
+                speakingToAIScore: score,
                 isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
             ))
         }
@@ -145,6 +154,7 @@ public class SentenceBuilder {
             result.append(SpeechSegment(
                 id: s.id, text: s.text, isToScreen: false,
                 sentenceStartedLookingAtScreen: false,
+                speakingToAIScore: score,
                 isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
             ))
         } else {
@@ -157,6 +167,7 @@ public class SentenceBuilder {
                         id: i == 0 ? s.id : span.id,
                         text: spanText, isToScreen: span.isToScreen,
                         sentenceStartedLookingAtScreen: true,
+                        speakingToAIScore: score,
                         isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
                     ))
                 }
@@ -169,11 +180,42 @@ public class SentenceBuilder {
                         text: remaining,
                         isToScreen: s.gazeSpans.last?.isToScreen ?? true,
                         sentenceStartedLookingAtScreen: true,
+                        speakingToAIScore: score,
                         isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
                     ))
                 }
             }
         }
+    }
+
+    // MARK: - Private: Scoring
+
+    /// Exponentially-weighted fraction of characters spoken while looking at the screen.
+    ///
+    /// For each character `i` in the sentence, weight `w_i = exp(-λ * i)`.
+    /// Score = Σ(w_i * isToScreen_i) / Σ(w_i), clamped to [0, 1].
+    /// Empty text → 0. Result is `1.0` when every weighted char is on-screen,
+    /// `0.0` when none are, and something in-between when gaze shifts.
+    private func speakingToAIScore(for s: Sentence) -> Float {
+        let totalChars = s.gazeSpans.reduce(0) { $0 + $1.charCount }
+        guard totalChars > 0 else {
+            // No gaze spans recorded — fall back to the bool for a sane default.
+            return s.startedLookingAtScreen ? 1.0 : 0.0
+        }
+
+        var weightedOn: Float = 0
+        var weightedTotal: Float = 0
+        var index: Int = 0
+        for span in s.gazeSpans {
+            for _ in 0..<span.charCount {
+                let w = expf(-gazeDecayLambda * Float(index))
+                weightedTotal += w
+                if span.isToScreen { weightedOn += w }
+                index += 1
+            }
+        }
+        guard weightedTotal > 0 else { return 0 }
+        return max(0, min(1, weightedOn / weightedTotal))
     }
 
     // MARK: - Private: Gaze Helpers

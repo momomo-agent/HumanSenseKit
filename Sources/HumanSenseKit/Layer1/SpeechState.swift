@@ -6,6 +6,11 @@ public struct SpeechSegment: Identifiable {
     public let text: String
     public let isToScreen: Bool
     public let sentenceStartedLookingAtScreen: Bool
+    /// Exponentially-weighted "talking-to-AI" score in [0, 1].
+    /// Early characters dominate (λ=0.5 → first 3-5 chars carry ~95% of weight),
+    /// but later chars still contribute. 1.0 = whole sentence spoken at screen,
+    /// 0.0 = never at screen, in-between = partially addressed.
+    public let speakingToAIScore: Float
     /// true = user's own speech (mouth moving + audio), false = ambient/other people
     public let isFromUser: Bool
     /// true = sentence has been finalized (silence gap detected), text won't change anymore
@@ -43,11 +48,14 @@ public struct SpeechSegment: Identifiable {
     public let signals: SignalSnapshot
 
     public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool,
+                speakingToAIScore: Float? = nil,
                 isFromUser: Bool = false, isFinal: Bool = false, signals: SignalSnapshot = SignalSnapshot()) {
         self.id = id
         self.text = text
         self.isToScreen = isToScreen
         self.sentenceStartedLookingAtScreen = sentenceStartedLookingAtScreen
+        // Backward-compat default: mirror the bool when no explicit score is supplied.
+        self.speakingToAIScore = speakingToAIScore ?? (sentenceStartedLookingAtScreen ? 1.0 : 0.0)
         self.isFromUser = isFromUser
         self.isFinal = isFinal
         self.signals = signals
