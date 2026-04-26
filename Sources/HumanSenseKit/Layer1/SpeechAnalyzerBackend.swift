@@ -33,7 +33,7 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
     /// Set before calling startTask().
     var contextualStrings: [String] = []
 
-    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?) -> Void)?
+    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?, _ audioStartTime: Double?, _ audioEndTime: Double?) -> Void)?
     var onError: ((Error) -> Void)?
 
     /// Called from audio render thread — must be nonisolated.
@@ -93,10 +93,12 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
                     let isFinal = result.isFinal
+                    let startTime = result.range.start.seconds
+                    let endTime = (result.range.start + result.range.duration).seconds
                     print("[Speech] Result gen=\(myGeneration): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
                     await MainActor.run {
                         guard let self, self.generation == myGeneration else { return }
-                        self.onResult?(text, isFinal, nil)
+                        self.onResult?(text, isFinal, nil, startTime, endTime)
                     }
                 }
             } catch {

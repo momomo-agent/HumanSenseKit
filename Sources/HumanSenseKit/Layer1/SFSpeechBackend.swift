@@ -17,7 +17,7 @@ final class SFSpeechBackend: SpeechRecognitionBackend {
     private var taskDurationTimer: Timer?
     private let maxTaskDuration: TimeInterval = 50.0
 
-    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?) -> Void)?
+    var onResult: ((_ text: String, _ isFinal: Bool, _ speakerLabel: String?, _ audioStartTime: Double?, _ audioEndTime: Double?) -> Void)?
     var onError: ((Error) -> Void)?
 
     nonisolated func appendBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -48,7 +48,7 @@ final class SFSpeechBackend: SpeechRecognitionBackend {
                     let text = result.bestTranscription.formattedString
                     let isFinal = result.isFinal
                     print("[SFSpeech] Result gen=\(gen): '\(text.prefix(60))' isFinal=\(isFinal ? 1 : 0)")
-                    self.onResult?(text, isFinal, nil)
+                    self.onResult?(text, isFinal, nil, nil, nil)
                     if isFinal {
                         self.startTask()
                     }

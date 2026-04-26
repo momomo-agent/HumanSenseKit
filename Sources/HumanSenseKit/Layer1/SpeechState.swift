@@ -15,6 +15,10 @@ public struct SpeechSegment: Identifiable {
     public let isFromUser: Bool
     /// true = sentence has been finalized (silence gap detected), text won't change anymore
     public let isFinal: Bool
+    /// Audio time range (seconds) this segment corresponds to in the input stream.
+    /// nil if timeIndexedProgressiveTranscription is not available.
+    public let audioStartTime: Double?
+    public let audioEndTime: Double?
 
     /// Debug snapshot of signals at the time this segment was created/updated
     public struct SignalSnapshot {
@@ -49,16 +53,18 @@ public struct SpeechSegment: Identifiable {
 
     public init(id: UUID = UUID(), text: String, isToScreen: Bool, sentenceStartedLookingAtScreen: Bool,
                 speakingToAIScore: Float? = nil,
-                isFromUser: Bool = false, isFinal: Bool = false, signals: SignalSnapshot = SignalSnapshot()) {
+                isFromUser: Bool = false, isFinal: Bool = false, signals: SignalSnapshot = SignalSnapshot(),
+                audioStartTime: Double? = nil, audioEndTime: Double? = nil) {
         self.id = id
         self.text = text
         self.isToScreen = isToScreen
         self.sentenceStartedLookingAtScreen = sentenceStartedLookingAtScreen
-        // Backward-compat default: mirror the bool when no explicit score is supplied.
         self.speakingToAIScore = speakingToAIScore ?? (sentenceStartedLookingAtScreen ? 1.0 : 0.0)
         self.isFromUser = isFromUser
         self.isFinal = isFinal
         self.signals = signals
+        self.audioStartTime = audioStartTime
+        self.audioEndTime = audioEndTime
     }
 }
 

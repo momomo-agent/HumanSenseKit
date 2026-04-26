@@ -27,13 +27,9 @@ public class SentenceBuilder {
         var gazeSpans: [GazeSpan]
         var isFromUser: Bool
         var signals: SpeechSegment.SignalSnapshot
-        /// Snapshot of the onset-weighted gaze score at sentence creation.
-        /// Computed by HumanStateEngine from audio-frame-rate samples over
-        /// the first 500ms of voice activity (exponential decay). Fixed for
-        /// the lifetime of the sentence — mid-sentence glances don't shift
-        /// the verdict, matching user intent: "the start of the utterance
-        /// defines whether the user was addressing the screen."
         var onsetGazeScore: Float
+        var audioStartTime: Double?
+        var audioEndTime: Double?
     }
 
     // MARK: - State
@@ -63,16 +59,13 @@ public class SentenceBuilder {
 
     /// Process a transcription result from SpeechAnalyzer.
     /// `isFinal` means Apple has finalized this segment — text won't change.
-    func handleResult(text: String, isFinal: Bool) {
+    func handleResult(text: String, isFinal: Bool, audioStartTime: Double? = nil, audioEndTime: Double? = nil) {
         let newCharCount = text.count
         let addedChars = max(0, newCharCount - lastCharCount)
 
         print("[SentenceBuilder] handleResult: '\(text.prefix(40))' isFinal=\(isFinal) chars=\(newCharCount) isSpeaking=\(isSpeaking)")
 
         if activeSentence == nil {
-            // Start a new sentence. Always seed a gaze span covering the
-            // current text so the score sees *every* character, regardless of
-            // whether the user started by looking at the screen.
             let snap = captureSignals?() ?? SpeechSegment.SignalSnapshot()
             let seedSpan = newCharCount > 0
                 ? [GazeSpan(charCount: newCharCount, isToScreen: isLookingAtScreen)]
@@ -84,30 +77,21 @@ public class SentenceBuilder {
                 gazeSpans: seedSpan,
                 isFromUser: isSpeaking,
                 signals: snap,
-                onsetGazeScore: onsetGazeScore
+                onsetGazeScore: onsetGazeScore,
+                audioStartTime: audioStartTime,
+                audioEndTime: audioEndTime
             )
             lastCharCount = newCharCount
             speechStartCaptured = true
         } else {
-            // Update existing sentence
             activeSentence?.text = text
-
-            // Late-latch isFromUser: if the sentence was created while the
-            // session hadn't latched yet (correlator still warming up,
-            // first ~500ms), but the session has now latched sessionIsUserSpeaking=true,
-            // upgrade the sentence. This only goes false→true (monotonic),
-            // so stray mid-sentence correlations (e.g. user glances and
-            // briefly speaks while someone else is mid-speech) can't flip
-            // a correctly-identified other-speaker sentence.
+            if let end = audioEndTime { activeSentence?.audioEndTime = end }
             if activeSentence?.isFromUser == false && isSpeaking {
                 activeSentence?.isFromUser = true
-                // Refresh signals snapshot so UI has accurate score context
                 if let snap = captureSignals?() {
                     activeSentence?.signals = snap
                 }
             }
-            // Always update gaze spans so the score reflects the entire
-            // sentence — not just sentences that started on-screen.
             if addedChars > 0 {
                 updateGazeSpans(addedChars: addedChars)
             } else if newCharCount != lastCharCount {
@@ -117,7 +101,6 @@ public class SentenceBuilder {
         }
 
         if isFinal {
-            // Apple says this segment is done — finalize it
             activeSentence?.isFinal = true
             finalizeActiveSentence()
         }
@@ -176,7 +159,8 @@ public class SentenceBuilder {
                 text: " ", isToScreen: false,
                 sentenceStartedLookingAtScreen: s.startedLookingAtScreen,
                 speakingToAIScore: score,
-                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
+                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals,
+                audioStartTime: s.audioStartTime, audioEndTime: s.audioEndTime
             ))
         }
 
@@ -185,7 +169,8 @@ public class SentenceBuilder {
                 id: s.id, text: s.text, isToScreen: false,
                 sentenceStartedLookingAtScreen: false,
                 speakingToAIScore: score,
-                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
+                isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals,
+                audioStartTime: s.audioStartTime, audioEndTime: s.audioEndTime
             ))
         } else {
             var offset = s.text.startIndex
@@ -198,7 +183,8 @@ public class SentenceBuilder {
                         text: spanText, isToScreen: span.isToScreen,
                         sentenceStartedLookingAtScreen: true,
                         speakingToAIScore: score,
-                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
+                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals,
+                        audioStartTime: s.audioStartTime, audioEndTime: s.audioEndTime
                     ))
                 }
                 offset = end
@@ -211,7 +197,8 @@ public class SentenceBuilder {
                         isToScreen: s.gazeSpans.last?.isToScreen ?? true,
                         sentenceStartedLookingAtScreen: true,
                         speakingToAIScore: score,
-                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals
+                        isFromUser: s.isFromUser, isFinal: s.isFinal, signals: s.signals,
+                        audioStartTime: s.audioStartTime, audioEndTime: s.audioEndTime
                     ))
                 }
             }

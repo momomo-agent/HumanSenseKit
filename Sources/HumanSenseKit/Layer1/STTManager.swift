@@ -160,10 +160,10 @@ public class STTManager: NSObject, ObservableObject {
         }
 
         // Layer 1 → Layer 2: transcription results feed sentence builder
-        speech.onResult = { [weak self] text, isFinal, speakerLabel in
+        speech.onResult = { [weak self] text, isFinal, speakerLabel, audioStartTime, audioEndTime in
             guard let self else { return }
             self.currentSpeakerLabel = speakerLabel
-            self.builder.handleResult(text: text, isFinal: isFinal)
+            self.builder.handleResult(text: text, isFinal: isFinal, audioStartTime: audioStartTime, audioEndTime: audioEndTime)
             if isFinal {
                 self.onSentenceFinalized?(text)
                 self.builder.resetActive()
