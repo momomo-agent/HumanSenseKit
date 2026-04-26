@@ -33,6 +33,7 @@ public class HumanStateEngine {
     private var pendingActivity: HumanActivity?
     private var pendingActivityStartTime: Date?
     private let debounceInterval: TimeInterval = 0.1
+    private var lastDiagLog: Date = .distantPast
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
@@ -213,13 +214,33 @@ public class HumanStateEngine {
         // fall back to audio.isSpeaking (RMS threshold).
         // Combined with lip-audio correlation for "is it THIS person speaking?"
         let voiceActive = sttManager.speechDetected || audio.isSpeaking
-        if voiceActive && lipAudioCorrelator.isCorrelated {
-            let headForward = face.headOrientation.isFacingForward
-            let toScreen = face.isLookingAtScreen && headForward
+        let isCorr = lipAudioCorrelator.isCorrelated
+        let headForward = face.headOrientation.isFacingForward
+        let lookAt = face.isLookingAtScreen
+
+        // Rate-limited diagnostic log: print the full gate state every ~0.5s.
+        let now = Date()
+        if now.timeIntervalSince(lastDiagLog) > 0.5 {
+            print(String(format:
+                "[HSE] voice=%@ corr=%@(%.2f lipVar=%.4f) lookAt=%@ headFwd=%@ | sttSpeech=%@ audioSpk=%@ mouth=%@",
+                voiceActive ? "✓" : "·",
+                isCorr ? "✓" : "·",
+                lipAudioCorrelator.correlation,
+                lipAudioCorrelator.lipVariance,
+                lookAt ? "✓" : "·",
+                headForward ? "✓" : "·",
+                sttManager.speechDetected ? "✓" : "·",
+                audio.isSpeaking ? "✓" : "·",
+                (abs(face.jawOpen - previousJawOpen) > 0.02 || face.jawOpen > 0.15) ? "✓" : "·"))
+            lastDiagLog = now
+        }
+
+        if voiceActive && isCorr {
+            let toScreen = lookAt && headForward
             return toScreen ? .speakingToScreen : .speakingToOther
         }
 
-        if !face.isLookingAtScreen { return .distracted }
+        if !lookAt { return .distracted }
         return .listening
     }
 }
