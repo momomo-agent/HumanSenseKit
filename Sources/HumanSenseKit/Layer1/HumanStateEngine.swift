@@ -48,6 +48,7 @@ public class HumanStateEngine {
     private let onsetDecayMs: Float = 150           // e-fold every 150ms
     private let onsetThreshold: Float = 0.30        // weighted corr needed to latch user-speaking
     private var previousVoiceActive: Bool = false
+    private var previousSpeechDetected: Bool = false
     private var onsetStart: TimeInterval? = nil    // set when voice rose; nil outside window
     private var onsetWeightedCorr: Float = 0
     private var onsetWeightedGaze: Float = 0
@@ -250,8 +251,10 @@ public class HumanStateEngine {
 
         // ---- Speech + gaze onset tracker (see field docs above) ----
         let nowTs = ProcessInfo.processInfo.systemUptime
-        if voiceActive && !previousVoiceActive {
-            // VAD rising edge — start a fresh onset window for this utterance.
+        let speechDetected = sttManager.speechDetected
+        if speechDetected && !previousSpeechDetected {
+            // Apple ML VAD rising edge (more precise than RMS-based voiceActive).
+            // Start a fresh onset window for this utterance.
             onsetStart = nowTs
             onsetWeightedCorr = 0
             onsetWeightedGaze = 0
@@ -302,6 +305,7 @@ public class HumanStateEngine {
         }
 
         previousVoiceActive = voiceActive
+        previousSpeechDetected = speechDetected
 
         // ---- Build the user-speaking gate ----
         // Prefer the onset verdict (captured from the first ~500ms); fall back
