@@ -27,6 +27,13 @@ public class SentenceBuilder {
         var gazeSpans: [GazeSpan]
         var isFromUser: Bool
         var signals: SpeechSegment.SignalSnapshot
+        /// Snapshot of the onset-weighted gaze score at sentence creation.
+        /// Computed by HumanStateEngine from audio-frame-rate samples over
+        /// the first 500ms of voice activity (exponential decay). Fixed for
+        /// the lifetime of the sentence — mid-sentence glances don't shift
+        /// the verdict, matching user intent: "the start of the utterance
+        /// defines whether the user was addressing the screen."
+        var onsetGazeScore: Float
     }
 
     // MARK: - State
@@ -46,6 +53,9 @@ public class SentenceBuilder {
     // External inputs
     var isLookingAtScreen: Bool = false
     var isSpeaking: Bool = false
+    /// Live onset-weighted gaze score, updated at audio-frame rate by
+    /// HumanStateEngine. Captured into each Sentence at creation time.
+    var onsetGazeScore: Float = 0
     /// Closure to capture current signal snapshot for debug display
     var captureSignals: (() -> SpeechSegment.SignalSnapshot)?
 
@@ -73,7 +83,8 @@ public class SentenceBuilder {
                 startedLookingAtScreen: isLookingAtScreen,
                 gazeSpans: seedSpan,
                 isFromUser: isSpeaking,
-                signals: snap
+                signals: snap,
+                onsetGazeScore: onsetGazeScore
             )
             lastCharCount = newCharCount
             speechStartCaptured = true
@@ -209,32 +220,17 @@ public class SentenceBuilder {
 
     // MARK: - Private: Scoring
 
-    /// Exponentially-weighted fraction of characters spoken while looking at the screen.
+    /// Returns the onset-weighted gaze score captured at sentence creation.
     ///
-    /// For each character `i` in the sentence, weight `w_i = exp(-λ * i)`.
-    /// Score = Σ(w_i * isToScreen_i) / Σ(w_i), clamped to [0, 1].
-    /// Empty text → 0. Result is `1.0` when every weighted char is on-screen,
-    /// `0.0` when none are, and something in-between when gaze shifts.
+    /// This score is computed by `HumanStateEngine` on the **audio-frame**
+    /// timeline (60fps), sampling the first 500ms of voice activity with
+    /// exponential decay (e-fold every 150ms). The per-character gaze span
+    /// approach that used to live here could only sample at STT's volatile
+    /// cadence (a few times per sentence) and therefore collapsed to 0/1
+    /// whenever STT happened to emit a single big chunk. Audio-frame
+    /// sampling avoids that aliasing.
     private func speakingToAIScore(for s: Sentence) -> Float {
-        let totalChars = s.gazeSpans.reduce(0) { $0 + $1.charCount }
-        guard totalChars > 0 else {
-            // No gaze spans recorded — fall back to the bool for a sane default.
-            return s.startedLookingAtScreen ? 1.0 : 0.0
-        }
-
-        var weightedOn: Float = 0
-        var weightedTotal: Float = 0
-        var index: Int = 0
-        for span in s.gazeSpans {
-            for _ in 0..<span.charCount {
-                let w = expf(-gazeDecayLambda * Float(index))
-                weightedTotal += w
-                if span.isToScreen { weightedOn += w }
-                index += 1
-            }
-        }
-        guard weightedTotal > 0 else { return 0 }
-        return max(0, min(1, weightedOn / weightedTotal))
+        return max(0, min(1, s.onsetGazeScore))
     }
 
     // MARK: - Private: Gaze Helpers

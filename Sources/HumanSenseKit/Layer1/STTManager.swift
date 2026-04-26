@@ -75,6 +75,13 @@ public class STTManager: NSObject, ObservableObject {
     public var isSpeaking: Bool = false {
         didSet { builder.isSpeaking = isSpeaking }
     }
+    /// Onset-weighted gaze score for the current utterance, fed by
+    /// HumanStateEngine every frame. SentenceBuilder reads this directly
+    /// so the per-sentence score reflects audio-frame-rate sampling, not
+    /// the few times STT happens to emit volatile text.
+    @Published public var onsetGazeScore: Float = 0 {
+        didSet { builder.onsetGazeScore = onsetGazeScore }
+    }
 
     public func captureSpeechStartState() {}
 

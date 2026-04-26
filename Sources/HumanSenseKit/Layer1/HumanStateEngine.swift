@@ -37,19 +37,25 @@ public class HumanStateEngine {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
-    // Speech onset tracker — decides "is this the user speaking?" from the
-    // first ~500ms of voice activity, using exponential decay so the first
-    // few frames dominate. Matches the gaze score semantics: what happens
-    // at the onset of an utterance is what defines it.
+    // Speech onset tracker — decides "is this the user speaking?" AND
+    // "is the user looking at the screen?" from the first ~500ms of voice
+    // activity, using exponential decay on the audio-frame timeline.
+    //
+    // Both signals (lipCorrelated and lookAtScreen) are sampled in lockstep
+    // so gaze and speech verdicts are symmetric: the first few frames
+    // dominate, what happens around the onset defines the utterance.
     private let onsetWindow: TimeInterval = 0.5    // sample for 500ms after VAD-on
     private let onsetDecayMs: Float = 150           // e-fold every 150ms
     private let onsetThreshold: Float = 0.30        // weighted corr needed to latch user-speaking
     private var previousVoiceActive: Bool = false
     private var onsetStart: TimeInterval? = nil    // set when voice rose; nil outside window
     private var onsetWeightedCorr: Float = 0
+    private var onsetWeightedGaze: Float = 0
     private var onsetWeightTotal: Float = 0
-    /// Latched verdict for the current speech utterance. Reset on VAD-off.
+    /// Latched verdict for the current speech utterance. Reset on VAD rising edge.
     private var onsetIsUserSpeaking: Bool = false
+    /// Weighted gaze score [0,1] for the current utterance (exposed to STT).
+    private(set) var onsetGazeScore: Float = 0
 
     public init(sttBackend: STTManager.BackendType = .speechAnalyzer) {
         self.faceManager = FaceTrackingManager()
@@ -186,6 +192,7 @@ public class HumanStateEngine {
 
         // Sync state to STT manager
         sttManager.isLookingAtScreen = face.isLookingAtScreen
+        sttManager.onsetGazeScore = onsetGazeScore
         let activitySpeaking = humanState.activity.isSpeaking
         if sttManager.isSpeaking != activitySpeaking {
             sttManager.isSpeaking = activitySpeaking
@@ -232,14 +239,16 @@ public class HumanStateEngine {
         let headForward = face.headOrientation.isFacingForward
         let lookAt = face.isLookingAtScreen
 
-        // ---- Speech onset tracker (see field docs above) ----
+        // ---- Speech + gaze onset tracker (see field docs above) ----
         let nowTs = ProcessInfo.processInfo.systemUptime
         if voiceActive && !previousVoiceActive {
             // VAD rising edge — start a fresh onset window for this utterance.
             onsetStart = nowTs
             onsetWeightedCorr = 0
+            onsetWeightedGaze = 0
             onsetWeightTotal = 0
             onsetIsUserSpeaking = false
+            onsetGazeScore = 0
         }
 
         if let start = onsetStart {
@@ -248,11 +257,18 @@ public class HumanStateEngine {
                 // Sample this frame with exponential decay — first frames dominate.
                 let w = expf(-elapsedMs / onsetDecayMs)
                 onsetWeightedCorr += w * (isCorrNow ? 1 : 0)
+                onsetWeightedGaze += w * (lookAt ? 1 : 0)
                 onsetWeightTotal += w
-                // Latch as soon as the weighted score crosses the threshold.
+                // Latch speaker verdict as soon as the score crosses threshold.
                 if !onsetIsUserSpeaking, onsetWeightTotal > 0,
                    onsetWeightedCorr / onsetWeightTotal >= onsetThreshold {
                     onsetIsUserSpeaking = true
+                }
+                // Publish current gaze score continuously (stabilizes as the
+                // window fills). STT will read whatever is latest when it
+                // emits text.
+                if onsetWeightTotal > 0 {
+                    onsetGazeScore = onsetWeightedGaze / onsetWeightTotal
                 }
             } else if !voiceActive {
                 // Utterance ended — keep verdict so late-arriving STT can use it,
@@ -277,14 +293,15 @@ public class HumanStateEngine {
         // Rate-limited diagnostic log: full gate state every ~0.5s.
         let now = Date()
         if now.timeIntervalSince(lastDiagLog) > 0.5 {
-            let onsetScore = onsetWeightTotal > 0 ? onsetWeightedCorr / onsetWeightTotal : 0
+            let corrScore = onsetWeightTotal > 0 ? onsetWeightedCorr / onsetWeightTotal : 0
             print(String(format:
-                "[HSE] voice=%@ corr=%@(%.2f) onset=%@(%.2f) lookAt=%@ headFwd=%@",
+                "[HSE] voice=%@ corr=%@(%.2f) onsetSpk=%@(%.2f) onsetGaze=%.2f lookAt=%@ headFwd=%@",
                 voiceActive ? "✓" : "·",
                 isCorrNow ? "✓" : "·",
                 lipAudioCorrelator.correlation,
                 onsetIsUserSpeaking ? "✓" : "·",
-                onsetScore,
+                corrScore,
+                onsetGazeScore,
                 lookAt ? "✓" : "·",
                 headForward ? "✓" : "·"))
             lastDiagLog = now
