@@ -280,6 +280,19 @@ public final class UserSentenceReconstructor: ObservableObject {
             matched = samples.filter { $0.ts >= s && $0.ts <= e }
         }
 
+        // Gross-mismatch fallback: if expansion failed to find ANY samples,
+        // the token's wall-clock timeline is completely out of sync with the
+        // sample ring buffer (typically caused by app backgrounding + audio
+        // engine restart without re-stamping audioStreamStartTime, so token
+        // times point at a stale base). In that case fall back to the most
+        // recent samples within a reasonable window so we still have signals
+        // to classify the token, rather than producing an all-zero row that
+        // would be wrongly judged non-user.
+        if matched.isEmpty, let latest = samples.last {
+            let fallbackWindow: Double = 1.0 // last 1s of samples
+            matched = samples.filter { $0.ts >= latest.ts - fallbackWindow }
+        }
+
         let jaws = matched.map { $0.jaw }
         let vols = matched.map { $0.vol }
         let n = matched.count

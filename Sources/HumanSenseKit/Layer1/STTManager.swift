@@ -189,6 +189,26 @@ public class STTManager: NSObject, ObservableObject {
         // Layer 0: engine restart → restart recognition
         audio.onRestart = { [weak self] in
             Task { @MainActor in
+                // Audio engine restarted (e.g. app returned from background,
+                // AVAudioSession interruption ended). The engine's sample
+                // timeline resets to 0, so any token audioTimeRange emitted
+                // AFTER this point is relative to a new stream start. The
+                // old `audioStreamStartTime` now points minutes / seconds
+                // ago — if we don't reset it, token wall-clock times will
+                // be computed from the stale base, landing far outside the
+                // sample ring buffer's wall-clock range and producing
+                // sampleCount=0 rows (all jaw/vol/gaze/head signals zero,
+                // token incorrectly judged non-user).
+                //
+                // Stamp a coarse approximation now; onFirstBuffer will
+                // replace it with the precise time the new analyzer
+                // consumes its first buffer, just like in initial start().
+                self?.audioStreamStartTime = Date()
+                self?.tokenAttributor.audioStreamStartTime = Date()
+                // Clear the reconstructor state too — the old token rows
+                // reference the old stream timeline and would mix with
+                // new ones under range queries.
+                self?.userSentenceReconstructor.clear()
                 self?.speech.startTask()
                 self?.builder.resetActive()
             }
