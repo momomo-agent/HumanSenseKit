@@ -303,10 +303,24 @@ public class STTManager: NSObject, ObservableObject {
             segments = raw
             return
         }
+        // Convert segment audio-stream-relative times to wall-clock so they
+        // match the reconstructor's internal TokenRow.startTime/endTime
+        // (which are audioStreamStartTime + audio-offset seconds).
+        //
+        // Without this conversion, every query misses every token and
+        // `attr.hasCoverage` is always false — segments silently retain
+        // the builder's legacy LipAudioCorrelator-based isFromUser verdict,
+        // even when the reconstructor clearly has the tokens attributed to
+        // the user (this was observed in kenefe's side-by-side demo vs
+        // visual-talk-ios screenshots: identical state, demo shows ratio=100%,
+        // visual-talk-ios shows isFromUser=false).
+        let base = audioStreamStartTime?.timeIntervalSince1970 ?? 0
         segments = raw.map { seg -> SpeechSegment in
+            let wallStart = seg.audioStartTime.map { base + $0 }
+            let wallEnd = seg.audioEndTime.map { base + $0 }
             let attr = userSentenceReconstructor.attribution(
-                for: seg.audioStartTime,
-                end: seg.audioEndTime
+                for: wallStart,
+                end: wallEnd
             )
             // Only override when the reconstructor actually has coverage for
             // this segment's time range. Otherwise preserve builder's verdict
@@ -329,7 +343,7 @@ public class STTManager: NSObject, ObservableObject {
             let newText: String
             if shouldReplaceText,
                let userOnly = userSentenceReconstructor.userTextInRange(
-                   start: seg.audioStartTime, end: seg.audioEndTime
+                   start: wallStart, end: wallEnd
                ) {
                 newText = userOnly
             } else {

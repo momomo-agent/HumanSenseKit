@@ -201,14 +201,27 @@ public final class UserSentenceReconstructor: ObservableObject {
         public var hasCoverage: Bool { tokenCount > 0 }
     }
 
-    /// Attribute an arbitrary audio time range (seconds relative to stream start)
-    /// against the tokens this reconstructor has seen.
+    /// Attribute an arbitrary time range against the tokens this
+    /// reconstructor has seen.
+    ///
+    /// IMPORTANT: `start` and `end` are WALL-CLOCK seconds (Unix epoch),
+    /// to match what `TokenRow.startTime / endTime` store internally
+    /// (which are `audioStreamStartTime + token.startTime`).
+    ///
+    /// Earlier versions of this API claimed the parameters were
+    /// "audio-stream-relative", but the comparison inside was always
+    /// done against wall-clock row times — so passing audio-offset
+    /// seconds would guarantee zero overlap and the caller would always
+    /// see `hasCoverage=false`. This was the root cause of visual-talk-ios
+    /// showing `isFromUser=false` in segments where demo's Tokens tab
+    /// clearly showed all-green user tokens with ratio=100%.
     ///
     /// Used by `STTManager.rebuildSegments()` to transparently upgrade
     /// `SpeechSegment.isFromUser` without changing the builder itself.
+    ///
     /// - Parameters:
-    ///   - start: audio-stream-relative seconds (nil → hasCoverage=false)
-    ///   - end: audio-stream-relative seconds (nil → hasCoverage=false)
+    ///   - start: wall-clock seconds (Unix epoch, nil → hasCoverage=false)
+    ///   - end:   wall-clock seconds (Unix epoch, nil → hasCoverage=false)
     public func attribution(for start: Double?, end: Double?) -> RangeAttribution {
         guard let start, let end, end >= start else {
             return RangeAttribution(tokenCount: 0, userTokenCount: 0, userRatio: 0)
@@ -227,8 +240,12 @@ public final class UserSentenceReconstructor: ObservableObject {
         return RangeAttribution(tokenCount: total, userTokenCount: userCount, userRatio: ratio)
     }
 
-    /// Returns the concatenated text of tokens whose audio range overlaps
+    /// Returns the concatenated text of tokens whose time range overlaps
     /// [start, end] AND whose per-token verdict is `isUser == true`.
+    ///
+    /// IMPORTANT: `start` and `end` are WALL-CLOCK seconds (Unix epoch),
+    /// matching `TokenRow.startTime / endTime` semantics. See
+    /// `attribution(for:end:)` for the full rationale.
     ///
     /// Used by `STTManager.rebuildSegments()` to transparently replace
     /// `SpeechSegment.text` with the user-only subset, so existing apps
