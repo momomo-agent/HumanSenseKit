@@ -748,9 +748,12 @@ public final class UserSentenceReconstructor: ObservableObject {
         volAvg: Float,
         maxJaw: Float
     ) -> Float {
-        // No meaningful audio → no sync to measure; assume silent == could
-        // still be user (e.g. the mouth motion IS the word). Neutral 0.5.
-        if volStd < 0.002 && volAvg < 0.01 { return 0.5 }
+        // No meaningful audio → no sync to measure, no evidence of speech.
+        // Used to return 0.5 on the theory "the mouth motion IS the word",
+        // but in practice kenefe observed many false u+=true tokens being
+        // driven by this free 0.5 while the user was listening silently.
+        // Changed to 0 — no audio, no user-speaking evidence.
+        if volStd < 0.002 && volAvg < 0.01 { return 0 }
 
         // Pearson: map [−1, +1] → [0, 1], with a bonus for positive
         // correlation and a penalty for negative (someone else's voice while
@@ -769,23 +772,35 @@ public final class UserSentenceReconstructor: ObservableObject {
         // Amplitude ratio: if audio is loud (high volStd) but mouth barely
         // moves (low jawStd), that is the classic "someone else speaking"
         // signature. Penalize.
+        //
+        // Dropped the volStd<0.003 "quiet audio neutral 0.7" branch: it
+        // was handing 0.7 of amp ratio to tokens with no audio and no
+        // jaw motion, pushing their sync to ~0.25 and getting them
+        // rescued into spans by neighbours. If volStd is near zero there
+        // is nothing to check against jawStd — return 0.
         let ampRatio: Float = {
-            if volStd < 0.003 { return 0.7 }   // quiet audio, neutral
-            let expected = volStd * 15   // rough empirical proportion
+            if volStd < 0.003 { return 0 }
+            let expected = volStd * 15
             let deficit = max(0, expected - jawStd) / max(expected, 0.001)
             return max(0, 1 - deficit)
         }()
 
-        // Require some jaw motion at all — a perfectly still mouth can't be
-        // producing speech even if Pearson looks ok by chance.
+        // Motion gate. Use jawStd (is the mouth MOVING) not maxJaw (is the
+        // mouth OPEN). A yawn / attentive face holds maxJaw high while
+        // jawStd stays low.
         //
-        // CHANGED: use jawStd (is the mouth MOVING) not maxJaw (is the mouth
-        // OPEN). A yawn holds maxJaw high while jawStd stays low, which was
-        // giving "held open" tokens the full 0.15 motion bonus and pushing
-        // their conf over the u+ exit threshold.
-        let motionPresence = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
+        // CRITICAL: turned from an additive 0.15 bonus into a MULTIPLICATIVE
+        // gate. When the jaw isn't actually moving, Pearson between noisy
+        // jaw samples and audio is meaningless — it can randomly hit +0.3+
+        // just from noise correlating with noise, giving pearsonScore=1.0
+        // and sync=0.5. In kenefe's real-device run (161 tokens, user
+        // silently watching someone else speak), that false Pearson pushed
+        // dozens of tokens' conf above 0.30 and into u+=true.
+        // Now: jaw not moving → sync near zero regardless of Pearson.
+        let motionGate = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
 
-        return pearsonScore * 0.5 + ampRatio * 0.35 + motionPresence * 0.15
+        let inner = pearsonScore * 0.6 + ampRatio * 0.4
+        return inner * motionGate
     }
 
     /// Compose the three sub-scores into a single [0, 1] confidence.
