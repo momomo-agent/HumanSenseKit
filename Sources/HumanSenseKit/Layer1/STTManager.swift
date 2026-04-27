@@ -358,25 +358,34 @@ public class STTManager: NSObject, ObservableObject {
             let shouldReplaceText = useReconstructorForSegmentText && !preserveBoundary
             if !needsAttrOverride && !shouldReplaceText { return seg }
 
-            // Compute the user-only text when requested. userTextInRange
-            // filters by isUserWithConfidence (4.9.53), so it naturally
-            // returns "" when no token in the range is attributed to the
-            // user. Do it only on the FIRST slice of a given audio range
-            // so later gaze-span slices don't duplicate the same text.
+            // Compute the user-only text when requested.
             //
-            // For volatile segments (isFinal=false), pass recentWindowSec
-            // so only the most recent 2 seconds of user speech appear.
-            // This prevents the "别人说 AAAA BBBB，你说 C，整段 AAAA BBBB C
-            // 都出现" problem kenefe reported: when the user starts speaking
-            // in the middle of a volatile batch that already contains non-user
-            // text, we don't want to display the stale non-user prefix.
+            // For VOLATILE segments (isFinal=false), use the reconstructor's
+            // live userSentence field directly instead of userTextInRange.
+            // Rationale: volatile STT gives us a single big text blob with
+            // no per-character timing, and userTextInRange can only filter
+            // by audio range + recentWindowSec. If any part of the batch
+            // leaked into u+=true (timestamp overlap, jaw threshold, etc.),
+            // the entire stale prefix appears. userSentence is already the
+            // real-time reconstruction of what the user is saying NOW,
+            // built incrementally from volatile + finalized tokens with
+            // Schmitt-trigger span extraction. It's the ground truth for
+            // "what should appear on screen during live speech".
+            //
+            // For FINAL segments, use userTextInRange as before so the
+            // segment text matches the exact audio range and doesn't drift
+            // if the user keeps speaking after finalization.
             let newText: String
-            if shouldReplaceText, isFirstSliceOfRange,
-               let userOnly = userSentenceReconstructor.userTextInRange(
-                   start: wallStart, end: wallEnd,
-                   recentWindowSec: seg.isFinal ? nil : 2.0
-               ) {
-                newText = userOnly
+            if shouldReplaceText, isFirstSliceOfRange {
+                if seg.isFinal {
+                    // Final: use range-based filtering.
+                    newText = userSentenceReconstructor.userTextInRange(
+                        start: wallStart, end: wallEnd
+                    ) ?? ""
+                } else {
+                    // Volatile: use live userSentence.
+                    newText = userSentenceReconstructor.userSentence
+                }
             } else if shouldReplaceText && !isFirstSliceOfRange {
                 // Subsequent slice of the same sentence: empty to avoid
                 // duplication across gaze-span slices.
