@@ -93,6 +93,28 @@ public final class UserSentenceReconstructor: ObservableObject {
         /// [0, 1] — composed confidence. `gate * (0.35*mouth + 0.65*sync)`.
         /// High only when all three cooperate.
         public let userConfidence: Float
+
+        /// Span-level verdict derived from running a Schmitt-trigger (double
+        /// threshold + gap tolerance + short-span drop) over a temporally
+        /// smoothed sequence of `userConfidence`. True when this token falls
+        /// inside a contiguous user span, regardless of its own momentary
+        /// conf value — so a single low-conf blip in the middle of a real
+        /// utterance is NOT cut out.
+        ///
+        /// Computed and filled in after all tokens are recorded; the row
+        /// itself defaults to false on construction.
+        public var isUserWithConfidence: Bool = false
+    }
+
+    /// A contiguous run of tokens attributed to the user by the confidence
+    /// span extractor. Use these instead of individual `isUser` flags when
+    /// you need 'what did the user actually say in this chunk of audio'.
+    public struct UserSpan: Sendable {
+        public let startTime: Double       // wall-clock seconds
+        public let endTime: Double         // wall-clock seconds
+        public let tokenIndices: [Int]     // indices into the input row array
+        public let text: String            // joined text of the tokens
+        public let avgConfidence: Float    // mean userConfidence across tokens
     }
 
     public struct Verdict: Sendable {
@@ -154,6 +176,33 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// Cost per gap = 3 - presenceHits.
     public var gapBudgetPerSentence: Int = 2
 
+    // MARK: - Confidence span extraction (Schmitt trigger)
+    //
+    // These parameters control how `isUserWithConfidence` and `extractUserSpans`
+    // convert the per-token `userConfidence` sequence into connected user
+    // spans. Goals: don't cut the middle of a real utterance, don't include
+    // foreign speech at either end.
+
+    /// Half-width of the temporal smoothing window (seconds) applied to
+    /// `userConfidence` before thresholding. Neighbors within this window
+    /// contribute an exponentially decayed weight (see `confSmoothSigmaSec`).
+    /// 0.20s matches the coarticulation timescale — a speaker's mouth-audio
+    /// coupling doesn't fluctuate faster than that.
+    public var confSmoothWindowSec: Double = 0.20
+    /// Decay sigma for smoothing weights. Bigger = more smoothing.
+    public var confSmoothSigmaSec: Double = 0.10
+    /// Enter-user threshold. Smoothed conf must exceed this to start a span.
+    public var confEnterThreshold: Float = 0.55
+    /// Exit-user threshold (below this → start counting the gap). Must be < enter.
+    public var confExitThreshold: Float = 0.30
+    /// Max gap (seconds) allowed inside a user span before we close it.
+    /// Lets breathing / pauses / single-token blips stay inside the span.
+    public var confGapToleranceSec: Double = 0.15
+    /// Spans shorter than this are discarded (noise / single-char false fires).
+    public var confMinSpanDurationSec: Double = 0.30
+    /// Two spans separated by less than this are merged into one.
+    public var confSpanMergeGapSec: Double = 0.40
+
     // MARK: - State
 
     private var samples: [Sample] = []
@@ -206,9 +255,166 @@ public final class UserSentenceReconstructor: ObservableObject {
         } else {
             volatileTokens = votedRows
         }
+
+        // Run span extraction across finalized+volatile and write the
+        // `isUserWithConfidence` flag back into both arrays. Spans need
+        // to see across batch boundaries or single-batch edge tokens
+        // would always fall outside their smoothed span.
+        applyConfidenceSpans()
+
         tokens = finalizedTokens + volatileTokens
 
         userSentence = reconstructSentence(volatile: volatileTokens, finalBatch: lastFinalBatch)
+    }
+
+    /// Run the Schmitt-trigger span extractor over all recorded tokens
+    /// and write `isUserWithConfidence` back into `finalizedTokens` and
+    /// `volatileTokens`. Kept internal to `recordTokens`.
+    private func applyConfidenceSpans() {
+        let all = finalizedTokens + volatileTokens
+        guard !all.isEmpty else { return }
+        let flags = computeConfidenceSpanFlags(for: all)
+        // Write back. finalizedTokens first N, then volatileTokens.
+        let nFinal = finalizedTokens.count
+        for i in 0..<nFinal {
+            finalizedTokens[i].isUserWithConfidence = flags[i]
+        }
+        for j in 0..<volatileTokens.count {
+            volatileTokens[j].isUserWithConfidence = flags[nFinal + j]
+        }
+    }
+
+    /// Public API: extract the user's spoken spans from an arbitrary row
+    /// sequence (e.g. a transcript chunk). Stateless, so callers can feed
+    /// it any subset of rows (including results from another reconstructor).
+    public func extractUserSpans(from rows: [TokenRow]) -> [UserSpan] {
+        let flags = computeConfidenceSpanFlags(for: rows)
+        var spans: [UserSpan] = []
+        var i = 0
+        while i < rows.count {
+            guard flags[i] else { i += 1; continue }
+            let start = i
+            while i < rows.count && flags[i] { i += 1 }
+            let end = i - 1
+            let tokens = Array(rows[start...end])
+            let text = tokens.map { $0.text }.joined()
+            let avgConf = tokens.isEmpty ? 0 : tokens.map { $0.userConfidence }.reduce(0, +) / Float(tokens.count)
+            spans.append(UserSpan(
+                startTime: tokens.first!.startTime,
+                endTime: tokens.last!.endTime,
+                tokenIndices: Array(start...end),
+                text: text,
+                avgConfidence: avgConf
+            ))
+        }
+        return spans
+    }
+
+    // MARK: - Schmitt-trigger core
+
+    /// Core of the confidence-span algorithm. Returns a flag per input
+    /// row indicating whether that row lives inside a recognised user
+    /// span. Steps:
+    ///   1. Temporal smoothing of userConfidence with exponential weights
+    ///   2. Two-threshold hysteresis (enter >= 0.55, exit < 0.30)
+    ///   3. Gap tolerance inside a span (<= 150ms default — absorbs
+    ///      breathing, micro-pauses, one-token conf dips)
+    ///   4. Drop spans shorter than 300ms (noise / single-char blips)
+    ///   5. Merge spans separated by less than 400ms
+    private func computeConfidenceSpanFlags(for rows: [TokenRow]) -> [Bool] {
+        let n = rows.count
+        guard n > 0 else { return [] }
+
+        // --- Step 1: temporal smoothing of userConfidence ---
+        // Use midpoint time per token so token length doesn't distort weights.
+        var midpoints: [Double] = []
+        midpoints.reserveCapacity(n)
+        for r in rows { midpoints.append((r.startTime + r.endTime) * 0.5) }
+
+        var smoothed = [Float](repeating: 0, count: n)
+        let window = confSmoothWindowSec
+        let sigma = max(confSmoothSigmaSec, 0.01)
+        for i in 0..<n {
+            var wsum: Double = 0
+            var wconf: Double = 0
+            // Walk outward from i while within window. O(n) on small n; for
+            // larger n we could bisect, but typical input is 5-50 tokens.
+            for k in 0..<n {
+                let dt = abs(midpoints[k] - midpoints[i])
+                if dt > window { continue }
+                let w = exp(-dt / sigma)
+                wsum += w
+                wconf += Double(rows[k].userConfidence) * w
+            }
+            smoothed[i] = wsum > 0 ? Float(wconf / wsum) : rows[i].userConfidence
+        }
+
+        // --- Step 2+3: Schmitt trigger with gap tolerance ---
+        // We produce raw spans [startIdx, endIdx] (inclusive).
+        struct RawSpan { var start: Int; var end: Int }
+        var rawSpans: [RawSpan] = []
+        var inSpan = false
+        var spanStart = 0
+        var lastInIdx = 0             // last index that was clearly inside
+        var belowStartTime: Double? = nil
+
+        for i in 0..<n {
+            let s = smoothed[i]
+            let t = midpoints[i]
+
+            if !inSpan {
+                if s >= confEnterThreshold {
+                    inSpan = true
+                    spanStart = i
+                    lastInIdx = i
+                    belowStartTime = nil
+                }
+            } else {
+                if s < confExitThreshold {
+                    // Start of a possible gap.
+                    if belowStartTime == nil { belowStartTime = t }
+                    if let bs = belowStartTime, t - bs > confGapToleranceSec {
+                        // Gap too long → close span at lastInIdx.
+                        rawSpans.append(RawSpan(start: spanStart, end: lastInIdx))
+                        inSpan = false
+                        belowStartTime = nil
+                    }
+                } else {
+                    // Back above exit threshold — reset gap, extend span.
+                    belowStartTime = nil
+                    lastInIdx = i
+                }
+            }
+        }
+        if inSpan {
+            rawSpans.append(RawSpan(start: spanStart, end: lastInIdx))
+        }
+
+        // --- Step 4: drop short spans ---
+        var kept: [RawSpan] = []
+        for sp in rawSpans {
+            let dur = rows[sp.end].endTime - rows[sp.start].startTime
+            if dur >= confMinSpanDurationSec { kept.append(sp) }
+        }
+
+        // --- Step 5: merge close spans ---
+        var merged: [RawSpan] = []
+        for sp in kept {
+            if var last = merged.last,
+               rows[sp.start].startTime - rows[last.end].endTime < confSpanMergeGapSec {
+                last.end = sp.end
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(sp)
+            }
+        }
+
+        // --- Build flags ---
+        var flags = [Bool](repeating: false, count: n)
+        for sp in merged {
+            for k in sp.start...sp.end { flags[k] = true }
+        }
+        return flags
     }
 
     public func clear() {
