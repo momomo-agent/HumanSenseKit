@@ -96,14 +96,17 @@ public final class UserSentenceReconstructor: ObservableObject {
     public static var gazeRatioThreshold: Float { defaultGazeRatioThreshold }
     public static var headFwdRatioThreshold: Float { defaultHeadFwdRatioThreshold }
 
-    // MARK: - Tunable thresholds (public so apps can tune)
+    // MARK: - Tunable thresholds (public so apps can tune).
+    // Defaults mirror the `default*` statics above; keep them in sync when
+    // tuning. We can't reference `Self.default...` in stored-property
+    // initializers on a non-final class, so literals are repeated here.
 
     /// maxJaw in window ≥ this → probably speaking
-    public var jawActivityThreshold: Float = Self.defaultJawActivityThreshold
+    public var jawActivityThreshold: Float = 0.12
     /// jaw std ≥ this → mouth moving
-    public var jawStdThreshold: Float = Self.defaultJawStdThreshold
+    public var jawStdThreshold: Float = 0.008
     /// vol present
-    public var volActiveThreshold: Float = Self.defaultVolActiveThreshold
+    public var volActiveThreshold: Float = 0.008
     /// below this sample count we expand the window
     public var minSampleCount: Int = 3
     /// ±80 ms expansion per try
@@ -111,11 +114,11 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// cap expansion
     public var maxWindowMs: Double = 0.30
     /// ≥20% of window frames looking at screen ⇒ "looking"
-    public var gazeRatioThreshold: Float = Self.defaultGazeRatioThreshold
-    public var headFwdRatioThreshold: Float = Self.defaultHeadFwdRatioThreshold
+    public var gazeRatioThreshold: Float = 0.2
+    public var headFwdRatioThreshold: Float = 0.2
     /// How many gap-budget points a sentence starts with.
     /// Cost per gap = 3 - presenceHits.
-    public var gapBudgetPerSentence: Int = Self.defaultGapBudgetPerSentence
+    public var gapBudgetPerSentence: Int = 2
 
     // MARK: - State
 
