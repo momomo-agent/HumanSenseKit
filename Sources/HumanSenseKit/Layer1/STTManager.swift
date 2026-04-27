@@ -126,6 +126,16 @@ public class STTManager: NSObject, ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// Warm up SFSpeech: download model + authorize ahead of time.
+    /// Call at app launch so the first `start()` doesn't lose audio
+    /// while the model downloads (typically 1-2s on first run).
+    public func warmUp() {
+        print("[STT] warmUp() - pre-downloading model")
+        speech.authorize { authorized in
+            print("[STT] warmUp complete, authorized=\(authorized)")
+        }
+    }
+
     public func start() {
         print("[STT] start()")
         speech.authorize { [weak self] authorized in
