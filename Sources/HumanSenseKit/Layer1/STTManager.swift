@@ -410,7 +410,7 @@ public class STTManager: NSObject, ObservableObject {
         }
         let elapsed = Date().timeIntervalSince(t0) * 1000
         if elapsed > 5 {
-            logger.log("[STT] segment processing took %.1fms (count=%d)", elapsed, raw.count)
+            print("[STT] segment processing took \(String(format: "%.1f", elapsed))ms (count=\(raw.count))")
         }
     }
 }
