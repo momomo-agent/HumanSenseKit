@@ -198,6 +198,24 @@ public class STTManager: NSObject, ObservableObject {
         builder.resetActive()
     }
 
+    /// Rotate the underlying STT task without touching the audio stream.
+    ///
+    /// Use this when a logical "turn" ended (e.g. the AI is about to speak,
+    /// or the user finished an utterance) and you want a clean slate for the
+    /// next utterance. Without this, SpeechTranscriber keeps appending
+    /// volatile results within the same task, which causes the next
+    /// utterance's transcription to carry leftover text from the previous
+    /// one (e.g. "今天今天今天怎么样" when the user said "今天怎么样" after a
+    /// prior "今天是周二" got appended).
+    ///
+    /// Does not touch `audioStreamStartTime` — the audio engine keeps
+    /// running and tokens still align with the same wall-clock baseline.
+    public func rotateTask() {
+        userSentenceReconstructor.clear()
+        builder.resetActive()
+        speech.startTask()
+    }
+
     public func clearSegments() {
         builder.clearAll()
         userSentenceReconstructor.clear()
