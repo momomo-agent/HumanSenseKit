@@ -242,8 +242,52 @@ public class STTManager: NSObject, ObservableObject {
         }
     }
 
+    /// When true (default), rebuildSegments() post-processes the builder's
+    /// output and overrides `isFromUser` using UserSentenceReconstructor's
+    /// per-token attribution when the new engine has coverage for the
+    /// segment's audio time range. Set to false to opt out and keep the
+    /// legacy (LipAudioCorrelator-based) attribution.
+    public var useReconstructorForSegmentAttribution: Bool = true
+    /// Minimum user-token ratio required (across reconstructor tokens that
+    /// overlap a segment's audioTimeRange) for the segment to be marked
+    /// `isFromUser = true`. Keep aligned with reconstructor's own
+    /// sentence-vote threshold.
+    public var reconstructorSegmentUserRatio: Float = 0.4
+
     private func rebuildSegments() {
-        segments = builder.buildSegments()
+        let raw = builder.buildSegments()
+        guard useReconstructorForSegmentAttribution else {
+            segments = raw
+            return
+        }
+        segments = raw.map { seg -> SpeechSegment in
+            let attr = userSentenceReconstructor.attribution(
+                for: seg.audioStartTime,
+                end: seg.audioEndTime
+            )
+            // Only override when the reconstructor actually has coverage for
+            // this segment's time range. Otherwise preserve builder's verdict
+            // so early segments (before any tokens) don't get false-downgraded.
+            guard attr.hasCoverage else { return seg }
+            let upgraded = attr.userRatio >= reconstructorSegmentUserRatio
+            // If builder already says true AND reconstructor also says true,
+            // leave it. If they disagree, trust reconstructor (it's stricter
+            // about "speaking at the screen" and correctly uses per-token
+            // jaw/gaze/head signals).
+            if seg.isFromUser == upgraded { return seg }
+            return SpeechSegment(
+                id: seg.id,
+                text: seg.text,
+                isToScreen: seg.isToScreen,
+                sentenceStartedLookingAtScreen: seg.sentenceStartedLookingAtScreen,
+                speakingToAIScore: seg.speakingToAIScore,
+                isFromUser: upgraded,
+                isFinal: seg.isFinal,
+                signals: seg.signals,
+                audioStartTime: seg.audioStartTime,
+                audioEndTime: seg.audioEndTime
+            )
+        }
     }
 }
 #endif

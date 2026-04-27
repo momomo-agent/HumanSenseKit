@@ -187,6 +187,46 @@ public final class UserSentenceReconstructor: ObservableObject {
         lastVerdict = .zero
     }
 
+    // MARK: - Range query API (for legacy adapters, e.g. STTManager.segments override)
+
+    /// Result of querying user-attribution over an audio time range.
+    public struct RangeAttribution: Sendable {
+        /// Number of tokens whose `[startTime, endTime]` overlaps the queried range.
+        public let tokenCount: Int
+        /// Number of overlapping tokens classified as user (after sentence vote).
+        public let userTokenCount: Int
+        /// userTokenCount / tokenCount. 0 when tokenCount == 0.
+        public let userRatio: Float
+        /// Whether the range had any overlapping tokens at all.
+        public var hasCoverage: Bool { tokenCount > 0 }
+    }
+
+    /// Attribute an arbitrary audio time range (seconds relative to stream start)
+    /// against the tokens this reconstructor has seen.
+    ///
+    /// Used by `STTManager.rebuildSegments()` to transparently upgrade
+    /// `SpeechSegment.isFromUser` without changing the builder itself.
+    /// - Parameters:
+    ///   - start: audio-stream-relative seconds (nil → hasCoverage=false)
+    ///   - end: audio-stream-relative seconds (nil → hasCoverage=false)
+    public func attribution(for start: Double?, end: Double?) -> RangeAttribution {
+        guard let start, let end, end >= start else {
+            return RangeAttribution(tokenCount: 0, userTokenCount: 0, userRatio: 0)
+        }
+        // Walk both finalized + volatile tokens. Overlap = any intersection.
+        var total = 0
+        var userCount = 0
+        let all = finalizedTokens + volatileTokens
+        for row in all {
+            // Overlap test (inclusive).
+            guard row.endTime >= start && row.startTime <= end else { continue }
+            total += 1
+            if row.isUser { userCount += 1 }
+        }
+        let ratio = total > 0 ? Float(userCount) / Float(total) : 0
+        return RangeAttribution(tokenCount: total, userTokenCount: userCount, userRatio: ratio)
+    }
+
     // MARK: - Row construction
 
     /// One SpeechToken = one row. Each token carries a precise `audioTimeRange`
