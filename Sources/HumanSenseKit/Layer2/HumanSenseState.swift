@@ -32,12 +32,23 @@ public class HumanSenseState {
     /// Whether the user is currently speaking.
     public var isSpeaking: Bool { rawState.audio.isSpeaking }
     /// Whether STT has active (non-finalized) text being recognized.
+    /// NOTE: `SpeechSegment.text` is now reconstructor-filtered (HSK 4.9.35+),
+    /// so this is already "user-only" text — segments not attributed to the
+    /// user have empty `.text`. Combined with `isFromUser`, this is the
+    /// correct signal for "the user is actively saying something to the
+    /// device right now".
     public var hasActiveSpeech: Bool {
-        rawState.speech.segments.contains { !$0.isFinal && !$0.text.isEmpty }
+        rawState.speech.segments.contains { seg in
+            !seg.isFinal && seg.isFromUser && !seg.text.isEmpty
+        }
     }
-    /// Whether the user is speaking while looking at the screen.
-    /// Requires both audio detection AND active STT recognition to avoid
-    /// false positives from ambient noise.
+    /// Whether the user is speaking to the device.
+    /// Gated by (a) looking at screen, (b) audio VAD active, (c) STT has
+    /// live user-attributed text. The third condition is critical — audio
+    /// VAD alone fires on ambient noise / other people's voices / mouth
+    /// movements without sound; requiring live STT user text makes this
+    /// track exactly with the token-level attribution that drives the
+    /// candidate text stream.
     public var isSpeakingToDevice: Bool { isLookingAtScreen && isSpeaking && hasActiveSpeech }
     /// Whether both eyes are closed.
     public var eyesClosed: Bool { rawState.face.eyesClosed }
