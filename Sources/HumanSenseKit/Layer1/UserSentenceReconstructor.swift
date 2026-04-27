@@ -592,14 +592,23 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// all). Returns an empty string when there are overlapping tokens but
     /// none are user — callers should treat this as "user said nothing
     /// here" and typically skip rendering.
-    public func userTextInRange(start: Double?, end: Double?) -> String? {
+    ///
+    /// - Parameter recentWindowSec: If non-nil, only include tokens whose
+    ///   endTime falls within the last `recentWindowSec` seconds from `end`.
+    ///   Used by volatile segments to show only the most recent user speech
+    ///   and avoid displaying stale non-user text that happened to be in
+    ///   the same STT batch.
+    public func userTextInRange(start: Double?, end: Double?, recentWindowSec: Double? = nil) -> String? {
         guard let start, let end, end >= start else { return nil }
+        let cutoff = recentWindowSec.map { end - $0 }
         var pieces: [String] = []
         var anyOverlap = false
         let all = finalizedTokens + volatileTokens
         for row in all {
             guard row.endTime >= start && row.startTime <= end else { continue }
             anyOverlap = true
+            // If recentWindowSec is set, skip tokens that ended before the cutoff.
+            if let c = cutoff, row.endTime < c { continue }
             // Filter by the conf-based verdict. Previously used `isUser`,
             // which is inflated by applySentenceVote (filledBySentence) and
             // let entire non-user sentences leak into the displayed text.
