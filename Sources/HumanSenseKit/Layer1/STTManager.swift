@@ -157,6 +157,37 @@ public class STTManager: NSObject, ObservableObject {
         isListening = false
     }
 
+    /// Notify STTManager that the underlying audio engine was restarted.
+    ///
+    /// When an AVAudioEngine is stopped and re-started (e.g. app returned
+    /// from background, AVAudioSession interruption ended, engine config
+    /// change forced a restart), its sample timeline resets to 0. Any
+    /// token audioTimeRange emitted AFTER that point is relative to the
+    /// NEW stream start, not the original one. If `audioStreamStartTime`
+    /// is not updated, token wall-clock times are computed from a stale
+    /// base and land far outside the sample ring buffer's wall-clock
+    /// range, producing `sampleCount=0` rows in the reconstructor — all
+    /// jaw/vol/gaze/head signals read as zero and the token is wrongly
+    /// judged non-user.
+    ///
+    /// For `usesExternalEngine=true` setups, call this from the host
+    /// app's audio engine restart path (e.g. after `engine.start()` on
+    /// interruption end / config change / scene activation).
+    ///
+    /// Safe to call repeatedly; `onFirstBuffer` will replace the coarse
+    /// stamp set here with the precise time the analyzer consumes its
+    /// next buffer.
+    public func notifyAudioStreamRestarted() {
+        audioStreamStartTime = Date()
+        tokenAttributor.audioStreamStartTime = Date()
+        // Clear the reconstructor state — old token rows reference the
+        // old stream timeline and would poison range queries under the
+        // new timeline.
+        userSentenceReconstructor.clear()
+        speech.startTask()
+        builder.resetActive()
+    }
+
     public func clearSegments() {
         builder.clearAll()
         userSentenceReconstructor.clear()
@@ -187,30 +218,14 @@ public class STTManager: NSObject, ObservableObject {
         }
 
         // Layer 0: engine restart → restart recognition
+        // Triggered by AudioEngineManager (internal engine health-check /
+        // interruption ended). For apps using an EXTERNAL AVAudioEngine
+        // (usesExternalEngine=true), this callback will NOT fire — the
+        // host app must call `notifyAudioStreamRestarted()` directly from
+        // its own engine restart path.
         audio.onRestart = { [weak self] in
             Task { @MainActor in
-                // Audio engine restarted (e.g. app returned from background,
-                // AVAudioSession interruption ended). The engine's sample
-                // timeline resets to 0, so any token audioTimeRange emitted
-                // AFTER this point is relative to a new stream start. The
-                // old `audioStreamStartTime` now points minutes / seconds
-                // ago — if we don't reset it, token wall-clock times will
-                // be computed from the stale base, landing far outside the
-                // sample ring buffer's wall-clock range and producing
-                // sampleCount=0 rows (all jaw/vol/gaze/head signals zero,
-                // token incorrectly judged non-user).
-                //
-                // Stamp a coarse approximation now; onFirstBuffer will
-                // replace it with the precise time the new analyzer
-                // consumes its first buffer, just like in initial start().
-                self?.audioStreamStartTime = Date()
-                self?.tokenAttributor.audioStreamStartTime = Date()
-                // Clear the reconstructor state too — the old token rows
-                // reference the old stream timeline and would mix with
-                // new ones under range queries.
-                self?.userSentenceReconstructor.clear()
-                self?.speech.startTask()
-                self?.builder.resetActive()
+                self?.notifyAudioStreamRestarted()
             }
         }
 
