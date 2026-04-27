@@ -315,6 +315,20 @@ public class STTManager: NSObject, ObservableObject {
         // visual-talk-ios screenshots: identical state, demo shows ratio=100%,
         // visual-talk-ios shows isFromUser=false).
         let base = audioStreamStartTime?.timeIntervalSince1970 ?? 0
+
+        // SentenceBuilder slices one sentence into multiple SpeechSegments
+        // along gaze-span boundaries, and every slice carries the ENTIRE
+        // sentence's audioStartTime/audioEndTime (no per-character timing
+        // available). If we naively ran userTextInRange per slice, each
+        // slice would get the same full user-only text back, duplicating
+        // it across the stream.
+        //
+        // Trick: run the user-only text replacement only once per unique
+        // audio-range signature, on the FIRST slice. Subsequent slices of
+        // the same sentence get their text zeroed to "". The on-screen
+        // result is the same user sentence appearing in the first slice,
+        // no duplication.
+        var seenRanges: Set<String> = []
         segments = raw.map { seg -> SpeechSegment in
             let wallStart = seg.audioStartTime.map { base + $0 }
             let wallEnd = seg.audioEndTime.map { base + $0 }
@@ -328,24 +342,37 @@ public class STTManager: NSObject, ObservableObject {
             guard attr.hasCoverage else { return seg }
             let upgraded = attr.userRatio >= reconstructorSegmentUserRatio
 
-            // If the attribution didn't change AND we don't need to replace
-            // text, skip the rebuild entirely.
+            // Unique signature per (start,end) pair — slices of the same
+            // sentence share both.
+            let rangeKey: String? = {
+                guard let s = wallStart, let e = wallEnd else { return nil }
+                return "\(s)_\(e)"
+            }()
+            let isFirstSliceOfRange: Bool = {
+                guard let k = rangeKey else { return true }
+                return seenRanges.insert(k).inserted
+            }()
+
             let needsAttrOverride = seg.isFromUser != upgraded
-            let shouldReplaceText = useReconstructorForSegmentText
-                && upgraded
-                && seg.text != " "  // preserve sentence-boundary markers used by SentenceBuilder
+            let preserveBoundary = seg.text == " "
+            let shouldReplaceText = useReconstructorForSegmentText && !preserveBoundary
             if !needsAttrOverride && !shouldReplaceText { return seg }
 
-            // Compute the user-only text when requested. If reconstructor has
-            // coverage but the user-only subset is empty, treat as "nothing
-            // to show" (empty string). Apps typically filter empty text out
-            // already (visual-talk-ios does).
+            // Compute the user-only text when requested. userTextInRange
+            // filters by isUserWithConfidence (4.9.53), so it naturally
+            // returns "" when no token in the range is attributed to the
+            // user. Do it only on the FIRST slice of a given audio range
+            // so later gaze-span slices don't duplicate the same text.
             let newText: String
-            if shouldReplaceText,
+            if shouldReplaceText, isFirstSliceOfRange,
                let userOnly = userSentenceReconstructor.userTextInRange(
                    start: wallStart, end: wallEnd
                ) {
                 newText = userOnly
+            } else if shouldReplaceText && !isFirstSliceOfRange {
+                // Subsequent slice of the same sentence: empty to avoid
+                // duplication across gaze-span slices.
+                newText = ""
             } else {
                 newText = seg.text
             }
