@@ -202,7 +202,7 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// to every matched window so adjacent tokens overlap slightly, which
     /// mirrors the continuity of real speech while preserving token-level
     /// attribution. 0 disables.
-    public var tokenAudioRangeMarginSeconds: Double = 0.10
+    public var tokenAudioRangeMarginSeconds: Double = 0.01
     /// ±80 ms expansion per try
     public var windowExpandMs: Double = 0.08
     /// cap expansion
