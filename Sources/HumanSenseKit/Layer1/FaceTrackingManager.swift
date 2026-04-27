@@ -8,13 +8,12 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     @Published public var faceState = FaceState()
     /// Latest ARFaceAnchor — updated synchronously on ARKit delegate thread.
     public nonisolated(unsafe) var currentAnchor: ARFaceAnchor?
-    /// Latest ARFrame — updated synchronously on ARKit delegate thread.
-    public nonisolated(unsafe) var currentFrame: ARFrame?
     @Published public var gazeTrail: [CGPoint] = []
     @Published public var arSessionReady = false
-    
+
     /// Real-time ARFrame callback for consumers (e.g. AvatarKit).
     /// Called synchronously on ARKit's delegate thread at ~60fps.
+    /// WARNING: Do NOT retain the ARFrame - extract needed data immediately.
     public nonisolated(unsafe) var onARFrame: ((ARFrame) -> Void)?
 
     /// The ARSession this manager reads from. Owned externally; FaceTrackingManager is a consumer.
@@ -93,8 +92,7 @@ extension FaceTrackingManager: ARSessionDelegate {
 
         guard let anchor = frame.anchors.first as? ARFaceAnchor else {
             noFaceFrames += 1
-            // Overwrite synchronously — only ever 1 frame retained
-            self.currentFrame = frame
+            // Call onARFrame callback but don't retain the frame
             self.onARFrame?(frame)
             if noFaceFrames >= noFaceThreshold {
                 Task { @MainActor in
@@ -174,9 +172,8 @@ extension FaceTrackingManager: ARSessionDelegate {
         // Detect emotion synchronously (only reads blendShapes, no frame retention)
         let blendShapesCopy = anchor.blendShapes
 
-        // Overwrite synchronously — only ever 1 frame retained
+        // Update anchor but don't retain frame to avoid memory warnings
         self.currentAnchor = anchor
-        self.currentFrame = frame
         self.onARFrame?(frame)
 
         // Dispatch only scalars to main — closure does NOT capture frame/anchor
