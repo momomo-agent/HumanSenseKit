@@ -43,13 +43,16 @@ public class HumanSenseState {
         }
     }
     /// Whether the user is speaking to the device.
-    /// Gated by (a) looking at screen, (b) audio VAD active, (c) STT has
-    /// live user-attributed text. The third condition is critical — audio
-    /// VAD alone fires on ambient noise / other people's voices / mouth
-    /// movements without sound; requiring live STT user text makes this
-    /// track exactly with the token-level attribution that drives the
-    /// candidate text stream.
-    public var isSpeakingToDevice: Bool { isLookingAtScreen && isSpeaking && hasActiveSpeech }
+    /// Gated ONLY by (a) looking at screen and (b) live STT user-attributed
+    /// text. We intentionally DO NOT AND with `isSpeaking` (audio VAD)
+    /// because that signal is a crude RMS-above-threshold check that fires
+    /// on any ambient sound (other people, TV, keyboard, fans) and also
+    /// has a 0.5s silence-delay latch that keeps it true well after the
+    /// user stopped. `hasActiveSpeech` already requires a live segment that
+    /// the reconstructor attributed to the user (jaw + gaze + head + STT
+    /// tokens), which is a much stronger and cleaner signal for "the user
+    /// is talking to the device right now".
+    public var isSpeakingToDevice: Bool { isLookingAtScreen && hasActiveSpeech }
     /// Whether both eyes are closed.
     public var eyesClosed: Bool { rawState.face.eyesClosed }
     /// Distance from the user's face to the camera in meters.
