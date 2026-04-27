@@ -328,6 +328,7 @@ public class STTManager: NSObject, ObservableObject {
         // the same sentence get their text zeroed to "". The on-screen
         // result is the same user sentence appearing in the first slice,
         // no duplication.
+        let t0 = Date()
         var seenRanges: Set<String> = []
         segments = raw.map { seg -> SpeechSegment in
             let wallStart = seg.audioStartTime.map { base + $0 }
@@ -406,6 +407,10 @@ public class STTManager: NSObject, ObservableObject {
                 audioStartTime: seg.audioStartTime,
                 audioEndTime: seg.audioEndTime
             )
+        }
+        let elapsed = Date().timeIntervalSince(t0) * 1000
+        if elapsed > 5 {
+            logger.log("[STT] segment processing took %.1fms (count=%d)", elapsed, raw.count)
         }
     }
 }
