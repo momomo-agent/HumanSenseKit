@@ -67,6 +67,14 @@ public class STTManager: NSObject, ObservableObject {
     /// to assign per-token isFromUser confidence.
     public let tokenAttributor = TokenAttributor()
 
+    /// Newer user-sentence reconstruction layer. Supersedes `tokenAttributor`
+    /// + `SentenceBuilder` for apps that just want `userSentence` (the live
+    /// or most-recently-finalized text attributed to the user). Runs in
+    /// parallel with the legacy attributor during the transition period.
+    /// HumanStateEngine feeds it per-frame jaw/vol/gaze/head samples and the
+    /// STT onTokens stream is routed here automatically.
+    public let userSentenceReconstructor = UserSentenceReconstructor()
+
     /// The audio engine. Can be replaced before calling start().
     public var audioEngine: AVAudioEngine {
         get { audio.audioEngine }
@@ -151,6 +159,7 @@ public class STTManager: NSObject, ObservableObject {
 
     public func clearSegments() {
         builder.clearAll()
+        userSentenceReconstructor.clear()
         rebuildSegments()
     }
 
@@ -210,8 +219,13 @@ public class STTManager: NSObject, ObservableObject {
 
         speech.onTokens = { [weak self] tokens, isFinal in
             self?.onTokens?(tokens, isFinal)
-            // Feed token attributor
+            // Feed token attributor (legacy)
             self?.tokenAttributor.process(tokens: tokens, isFinal: isFinal)
+            // Feed new reconstructor
+            self?.userSentenceReconstructor.recordTokens(
+                tokens, isFinal: isFinal,
+                audioStreamStart: self?.audioStreamStartTime
+            )
         }
 
         speech.onFirstBuffer = { [weak self] date in

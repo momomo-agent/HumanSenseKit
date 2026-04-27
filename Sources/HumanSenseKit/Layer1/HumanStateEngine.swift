@@ -182,6 +182,16 @@ public class HumanStateEngine {
         humanState.face = face
         humanState.audio = audio
 
+        // Feed the user-sentence reconstructor per frame. Matches the live
+        // view of signals used for token attribution.
+        sttManager.userSentenceReconstructor.recordSample(
+            ts: Date().timeIntervalSince1970,
+            jaw: face.jawOpen,
+            vol: audio.volume,
+            gaze: face.isLookingAtScreen,
+            headFwd: face.headOrientation.isFacingForward
+        )
+
         let newActivity = inferActivity(face: face, audio: audio)
 
         if newActivity != humanState.activity {
