@@ -560,14 +560,17 @@ public final class UserSentenceReconstructor: ObservableObject {
             return RangeAttribution(tokenCount: 0, userTokenCount: 0, userRatio: 0)
         }
         // Walk both finalized + volatile tokens. Overlap = any intersection.
+        // Switched from `isUser` to `isUserWithConfidence` so STTManager's
+        // segment rebuilding sees the conf-based verdict, matching what
+        // u+ shows in the demo's token table and what reconstructSentence
+        // now produces for the userSentence field.
         var total = 0
         var userCount = 0
         let all = finalizedTokens + volatileTokens
         for row in all {
-            // Overlap test (inclusive).
             guard row.endTime >= start && row.startTime <= end else { continue }
             total += 1
-            if row.isUser { userCount += 1 }
+            if row.isUserWithConfidence { userCount += 1 }
         }
         let ratio = total > 0 ? Float(userCount) / Float(total) : 0
         return RangeAttribution(tokenCount: total, userTokenCount: userCount, userRatio: ratio)
@@ -597,7 +600,10 @@ public final class UserSentenceReconstructor: ObservableObject {
         for row in all {
             guard row.endTime >= start && row.startTime <= end else { continue }
             anyOverlap = true
-            if row.isUser { pieces.append(row.text) }
+            // Filter by the conf-based verdict. Previously used `isUser`,
+            // which is inflated by applySentenceVote (filledBySentence) and
+            // let entire non-user sentences leak into the displayed text.
+            if row.isUserWithConfidence { pieces.append(row.text) }
         }
         guard anyOverlap else { return nil }
         return pieces.joined()
@@ -742,17 +748,22 @@ public final class UserSentenceReconstructor: ObservableObject {
         let openness = smoothstep(edge0: 0.04, edge1: jawActivityThreshold + 0.08, x: maxJaw)
         // Variation: did the mouth move WITHIN the token?
         let variation = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2.5, x: jawStd)
-        // Sustained-open: is the average opening elevated above rest
-        // baseline? Captures 'mouth held open while talking' tokens that
-        // score low on variation but are clearly in speaking state.
-        let sustained = smoothstep(edge0: 0.10, edge1: 0.20, x: avgJaw)
-        // Activity = variation OR sustained-open. Either suffices.
-        let activity = max(variation, sustained)
-        // Require both open AND some form of activity. This keeps the
-        // 'held open yawn' case penalised (low variation AND low sustained
-        // won't happen because yawn is sustained? — but yawn also fails
-        // gate+sync+vol so we are safe) and the 'speaking with sustained
-        // opening' case rewarded.
+        // Sustained-open: average opening elevated above rest baseline.
+        // Raised the edges 0.10–0.20 → 0.18–0.30 so "mouth slightly open
+        // while listening" (avgJaw ~0.15-0.20) no longer fully saturates
+        // this channel. kenefe's listening screenshot had avgJaw ~0.18
+        // which scored 0.75 and inflated mouth to 0.75 — now scores ~0.0.
+        let sustained = smoothstep(edge0: 0.18, edge1: 0.30, x: avgJaw)
+        // Reach: how much the max opening exceeded the avg. Real articulation
+        // has clearly-defined peaks above the rest posture; a statically
+        // held-open mouth has maxJaw ≈ avgJaw (low reach). Weighting reach
+        // separates "doing something" from "sitting open".
+        let reach = smoothstep(edge0: 0.03, edge1: 0.10, x: max(0, maxJaw - avgJaw))
+        // Activity = variation OR sustained-open OR reach. Any single
+        // real speech signal is enough, but a mouth that is only a bit
+        // open and not moving (listening posture) now scores near 0 on
+        // all three.
+        let activity = max(variation, max(sustained, reach))
         return min(openness, activity)
     }
 
@@ -814,20 +825,26 @@ public final class UserSentenceReconstructor: ObservableObject {
             return max(0, 1 - deficit)
         }()
 
-        // Motion gate. Gate sync on 'mouth is in a speaking posture' —
-        // which means EITHER moving (high jawStd) OR held open past a
-        // speaking-posture baseline (high avgJaw). This fixes the
-        // false-negative case from kenefe's real-device run:
-        //   "今天天气怎么样" — the middle tokens kept jaw at 0.21-0.27
-        //   with near-zero jawStd. Under the jawStd-only gate they got
-        //   motionGate=0 → sync=0 → conf=0 → u+=false even though speech
-        //   was clearly happening.
+        // Motion gate on sync: 'the mouth is in a speaking posture'.
+        // Speaking can present as (a) moving jaw → high jawStd, (b) sustained
+        // open above listening baseline → high avgJaw, or (c) clear reach
+        // from rest to peak → high (maxJaw - avgJaw). Any one opens the gate.
         //
-        // Still a gate (not additive) so silently-listening with a closed
-        // mouth still hard-zeros sync.
+        // Raised the sustained-open edges 0.15–0.25 → 0.22–0.32 and added
+        // reach as a third opener so a listener with slightly parted lips
+        // no longer leaks sync credit. kenefe observed the old thresholds
+        // were too low for "mouth slightly open while watching".
         let motionByStd = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
-        let motionByOpen = smoothstep(edge0: 0.15, edge1: 0.25, x: avgJaw)
-        let motionGate = max(motionByStd, motionByOpen)
+        let motionByOpen = smoothstep(edge0: 0.22, edge1: 0.32, x: avgJaw)
+        let motionByReach = smoothstep(edge0: 0.04, edge1: 0.12, x: max(0, maxJaw - avgJaw))
+        // Pearson-based opener: when audio and jaw move together with
+        // clear positive correlation AND the mouth is at least open,
+        // that's speech even if no single motion channel is dominant.
+        // Prevents false negatives on continuous-phonation tokens where
+        // jawStd is low, avgJaw is below 0.22, and reach is tiny.
+        let opennessFloor = smoothstep(edge0: 0.10, edge1: 0.20, x: maxJaw)
+        let motionByPearson = pearson >= 0.3 && volStd > 0.005 ? opennessFloor : 0
+        let motionGate = max(motionByStd, max(motionByOpen, max(motionByReach, motionByPearson)))
 
         let inner = pearsonScore * 0.6 + ampRatio * 0.4
         return inner * motionGate
