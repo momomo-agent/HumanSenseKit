@@ -20,31 +20,27 @@ public class HumanSenseKit {
     }
     
     /// Real-time ARFrame callback — bypasses SwiftUI for 60fps consumers (e.g. AvatarKit).
+    /// WARNING: Do NOT retain the ARFrame - extract needed data immediately.
     public var onARFrame: ((ARFrame) -> Void)? {
         get { engine.onARFrame }
         set { engine.onARFrame = newValue }
     }
-    
+
     /// Start sensing. Optionally provide a shared ARSession.
     /// If nil, HumanSenseKit creates its own.
     public func start(session: ARSession? = nil) {
         engine.start(session: session)
     }
-    
+
     public func stop() {
         engine.stop()
     }
-    
+
     // MARK: - Raw Sensor Access
-    
+
     /// The current ARFaceAnchor from face tracking, if available.
     public var currentFaceAnchor: ARFaceAnchor? {
         engine.currentFaceAnchor
-    }
-    
-    /// The latest ARFrame — use for AvatarKit rendering and camera background.
-    public var currentARFrame: ARFrame? {
-        engine.currentARFrame
     }
 
     /// Lip-audio correlation value (0-1). Higher = lips and audio are in sync.
