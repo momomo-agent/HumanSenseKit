@@ -564,11 +564,15 @@ public final class UserSentenceReconstructor: ObservableObject {
         // segment rebuilding sees the conf-based verdict, matching what
         // u+ shows in the demo's token table and what reconstructSentence
         // now produces for the userSentence field.
+        //
+        // Optimization: tokens are appended in time order, so we can break
+        // early when row.startTime > end (no more overlaps possible).
         var total = 0
         var userCount = 0
         let all = finalizedTokens + volatileTokens
         for row in all {
-            guard row.endTime >= start && row.startTime <= end else { continue }
+            if row.startTime > end { break }  // Early exit: no more overlaps
+            guard row.endTime >= start else { continue }  // Skip tokens before range
             total += 1
             if row.isUserWithConfidence { userCount += 1 }
         }
@@ -605,7 +609,8 @@ public final class UserSentenceReconstructor: ObservableObject {
         var anyOverlap = false
         let all = finalizedTokens + volatileTokens
         for row in all {
-            guard row.endTime >= start && row.startTime <= end else { continue }
+            if row.startTime > end { break }  // Early exit: no more overlaps
+            guard row.endTime >= start else { continue }  // Skip tokens before range
             anyOverlap = true
             // If recentWindowSec is set, skip tokens that ended before the cutoff.
             if let c = cutoff, row.endTime < c { continue }
