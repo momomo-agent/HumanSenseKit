@@ -74,15 +74,31 @@ final class SpeechAnalyzerBackend: SpeechRecognitionBackend {
             // Format not yet known — drop buffer to avoid sending Float32 to analyzer
             return
         }
-        // Fallback: if noteBufferTime wasn't called for some reason, still
-        // approximate the origin here. This is slightly later than the real
-        // first sample but prevents missing the stamp entirely.
-        if firstBufferWallTime == nil {
-            let now = Date()
-            firstBufferWallTime = now
-            let callback = onFirstBuffer
-            Task { @MainActor in callback?(now) }
-        }
+        // NOTE: previously this had a Date()-based fallback that
+        // pre-stamped `firstBufferWallTime` if noteBufferTime hadn't fired
+        // yet. Problem: AudioEngineManager's tap callback invokes
+        // `onBuffer` BEFORE `onBufferWithTime`, so in steady state the
+        // fallback ALWAYS won the race and the AVAudioTime-based precise
+        // stamp from noteBufferTime was silently dropped by its
+        // `guard firstBufferWallTime == nil` early return.
+        //
+        // Result: audioStreamStartTime was always stamped at Date()
+        // (the moment the tap callback ran) rather than at the true
+        // wall-clock time of the first audio sample. After app switch /
+        // AVAudioEngine restart, the first buffer can arrive with several
+        // hundred ms of pipeline latency; Date() misrepresents this as
+        // "now", shifting the whole audio timeline forward relative to
+        // the jaw/vol sample ring buffer. Per-token audioTimeRange queries
+        // then miss the real jaw-motion samples by exactly that offset,
+        // which is why kenefe saw maxJaw drop from 0.4-0.6 (volatile
+        // whole-sentence, wide window masks the drift) to 0.11 (final
+        // per-character, narrow window fully outside the drift) after
+        // switching apps and coming back.
+        //
+        // The fallback in startTask-but-no-noteBufferTime case is handled
+        // below in the buffer-drop path: if format isn't ready we drop
+        // the buffer anyway, so never committing firstBufferWallTime
+        // until noteBufferTime fires is fine.
         if buffer.format == format {
             continuation.yield(AnalyzerInput(buffer: buffer))
         } else if let converter = AVAudioConverter(from: buffer.format, to: format) {
