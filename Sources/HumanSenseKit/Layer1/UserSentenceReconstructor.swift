@@ -285,7 +285,6 @@ public final class UserSentenceReconstructor: ObservableObject {
 
         if isFinal {
             finalizedTokens.append(contentsOf: votedRows)
-            lastFinalBatch = votedRows
             volatileTokens.removeAll()
             if finalizedTokens.count > 500 {
                 finalizedTokens.removeFirst(finalizedTokens.count - 500)
@@ -299,6 +298,15 @@ public final class UserSentenceReconstructor: ObservableObject {
         // to see across batch boundaries or single-batch edge tokens
         // would always fall outside their smoothed span.
         applyConfidenceSpans()
+
+        // Snapshot lastFinalBatch AFTER span extraction so it carries
+        // correct isUserWithConfidence values. Reading it before the
+        // write-back would give us all-false flags.
+        if isFinal {
+            let batchSize = votedRows.count
+            let start = max(0, finalizedTokens.count - batchSize)
+            lastFinalBatch = Array(finalizedTokens[start..<finalizedTokens.count])
+        }
 
         tokens = finalizedTokens + volatileTokens
 
@@ -962,30 +970,24 @@ public final class UserSentenceReconstructor: ObservableObject {
         row.maxJaw >= jawActivityThreshold || row.jawStd >= jawStdThreshold
     }
 
+    /// Build the on-screen "what the user said" string.
+    ///
+    /// Switched from `isUser` (per-token binary, then inflated by
+    /// `applySentenceVote` into filledBySentence) to `isUserWithConfidence`
+    /// (Schmitt-trigger span extraction on the smoothed `userConfidence`).
+    /// Reasoning: sentence vote + gapBudget recovery were filling non-user
+    /// tokens back into the displayed sentence whenever the user said even
+    /// a few words in an otherwise external-speech batch — exactly what
+    /// kenefe reported:
+    ///     "但凡我有一点点说话，都是一整句不管是不是我说的 直接显示。"
+    /// The span extractor already handles mid-utterance dips (smoothing +
+    /// gap tolerance) and short-blip rejection internally, so we don't
+    /// need a second recovery layer here.
     private func reconstructSentence(volatile: [TokenRow], finalBatch: [TokenRow]) -> String {
         if !volatile.isEmpty {
-            return volatile.filter { $0.isUser }.map(\.text).joined()
+            return volatile.filter { $0.isUserWithConfidence }.map(\.text).joined()
         }
-        var tail: [TokenRow] = []
-        var budget = gapBudgetPerSentence
-        for row in finalBatch.reversed() {
-            if row.isUser {
-                tail.insert(row, at: 0)
-                continue
-            }
-            if tail.isEmpty {
-                continue
-            }
-            guard mouthMoved(row) else { break }
-            let cost = 3 - presenceHits(row)
-            if cost <= budget {
-                tail.insert(row, at: 0)
-                budget -= cost
-            } else {
-                break
-            }
-        }
-        return tail.map(\.text).joined()
+        return finalBatch.filter { $0.isUserWithConfidence }.map(\.text).joined()
     }
 }
 
