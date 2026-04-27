@@ -109,6 +109,17 @@ public final class UserSentenceReconstructor: ObservableObject {
     public var volActiveThreshold: Float = 0.008
     /// below this sample count we expand the window
     public var minSampleCount: Int = 3
+    /// Symmetric margin (seconds) added to every token's audioTimeRange before
+    /// sampling jaw/vol/gaze signals. STT tokenization timestamps can drift
+    /// ~50-100ms from the actual jaw motion peak, and per-token ranges tend
+    /// to be short (100-300ms), so without this margin `maxJaw` frequently
+    /// misses the peak even when the user's mouth clearly opened during the
+    /// word (observed: volatile whole-sentence row reports maxJaw=0.6, final
+    /// per-character rows all report 0.11). The margin adds 2×marginSeconds
+    /// to every matched window so adjacent tokens overlap slightly, which
+    /// mirrors the continuity of real speech while preserving token-level
+    /// attribution. 0 disables.
+    public var tokenAudioRangeMarginSeconds: Double = 0.10
     /// ±80 ms expansion per try
     public var windowExpandMs: Double = 0.08
     /// cap expansion
@@ -288,12 +299,20 @@ public final class UserSentenceReconstructor: ObservableObject {
     }
 
     private func buildRow(text: String, wallStart: Double, wallEnd: Double, isFinal: Bool) -> TokenRow {
+        // Apply a symmetric margin to the token's audio range before sampling.
+        // STT token timestamps are best-effort: the actual jaw motion peak
+        // for a character can sit 50-100ms outside the reported range, and
+        // per-character final ranges are short enough (100-300ms) that
+        // `jaws.max()` routinely misses the peak without this margin.
+        let margin = tokenAudioRangeMarginSeconds
         var expand: Double = 0
-        var matched = samples.filter { $0.ts >= wallStart && $0.ts <= wallEnd }
+        let baseStart = wallStart - margin
+        let baseEnd = wallEnd + margin
+        var matched = samples.filter { $0.ts >= baseStart && $0.ts <= baseEnd }
         while matched.count < minSampleCount && expand < maxWindowMs {
             expand += windowExpandMs
-            let s = wallStart - expand
-            let e = wallEnd + expand
+            let s = baseStart - expand
+            let e = baseEnd + expand
             matched = samples.filter { $0.ts >= s && $0.ts <= e }
         }
 
