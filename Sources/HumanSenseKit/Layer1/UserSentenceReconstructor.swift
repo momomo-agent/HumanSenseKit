@@ -227,6 +227,32 @@ public final class UserSentenceReconstructor: ObservableObject {
         return RangeAttribution(tokenCount: total, userTokenCount: userCount, userRatio: ratio)
     }
 
+    /// Returns the concatenated text of tokens whose audio range overlaps
+    /// [start, end] AND whose per-token verdict is `isUser == true`.
+    ///
+    /// Used by `STTManager.rebuildSegments()` to transparently replace
+    /// `SpeechSegment.text` with the user-only subset, so existing apps
+    /// that render `segment.text` get a stream of "just what the user
+    /// said at the screen" without any code change.
+    ///
+    /// Returns `nil` when there is no coverage (no overlapping tokens at
+    /// all). Returns an empty string when there are overlapping tokens but
+    /// none are user — callers should treat this as "user said nothing
+    /// here" and typically skip rendering.
+    public func userTextInRange(start: Double?, end: Double?) -> String? {
+        guard let start, let end, end >= start else { return nil }
+        var pieces: [String] = []
+        var anyOverlap = false
+        let all = finalizedTokens + volatileTokens
+        for row in all {
+            guard row.endTime >= start && row.startTime <= end else { continue }
+            anyOverlap = true
+            if row.isUser { pieces.append(row.text) }
+        }
+        guard anyOverlap else { return nil }
+        return pieces.joined()
+    }
+
     // MARK: - Row construction
 
     /// One SpeechToken = one row. Each token carries a precise `audioTimeRange`

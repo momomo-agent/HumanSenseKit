@@ -253,6 +253,14 @@ public class STTManager: NSObject, ObservableObject {
     /// `isFromUser = true`. Keep aligned with reconstructor's own
     /// sentence-vote threshold.
     public var reconstructorSegmentUserRatio: Float = 0.4
+    /// When true (default), also replaces `SpeechSegment.text` with the
+    /// user-only subset produced by UserSentenceReconstructor for the
+    /// segment's audio time range. This gives apps rendering
+    /// `segment.text` a live "what the user just said to the screen"
+    /// stream without any code change. Only takes effect when
+    /// `useReconstructorForSegmentAttribution` is also true and the
+    /// segment is flagged as user.
+    public var useReconstructorForSegmentText: Bool = true
 
     private func rebuildSegments() {
         let raw = builder.buildSegments()
@@ -270,14 +278,32 @@ public class STTManager: NSObject, ObservableObject {
             // so early segments (before any tokens) don't get false-downgraded.
             guard attr.hasCoverage else { return seg }
             let upgraded = attr.userRatio >= reconstructorSegmentUserRatio
-            // If builder already says true AND reconstructor also says true,
-            // leave it. If they disagree, trust reconstructor (it's stricter
-            // about "speaking at the screen" and correctly uses per-token
-            // jaw/gaze/head signals).
-            if seg.isFromUser == upgraded { return seg }
+
+            // If the attribution didn't change AND we don't need to replace
+            // text, skip the rebuild entirely.
+            let needsAttrOverride = seg.isFromUser != upgraded
+            let shouldReplaceText = useReconstructorForSegmentText
+                && upgraded
+                && seg.text != " "  // preserve sentence-boundary markers used by SentenceBuilder
+            if !needsAttrOverride && !shouldReplaceText { return seg }
+
+            // Compute the user-only text when requested. If reconstructor has
+            // coverage but the user-only subset is empty, treat as "nothing
+            // to show" (empty string). Apps typically filter empty text out
+            // already (visual-talk-ios does).
+            let newText: String
+            if shouldReplaceText,
+               let userOnly = userSentenceReconstructor.userTextInRange(
+                   start: seg.audioStartTime, end: seg.audioEndTime
+               ) {
+                newText = userOnly
+            } else {
+                newText = seg.text
+            }
+
             return SpeechSegment(
                 id: seg.id,
-                text: seg.text,
+                text: newText,
                 isToScreen: seg.isToScreen,
                 sentenceStartedLookingAtScreen: seg.sentenceStartedLookingAtScreen,
                 speakingToAIScore: seg.speakingToAIScore,
