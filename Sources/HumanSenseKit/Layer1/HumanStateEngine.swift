@@ -318,19 +318,39 @@ public class HumanStateEngine {
 
         if isUserSpeaking {
             let toScreen = lookAt && headForward
-            // Additional gate for speakingToScreen: require the reconstructor
-            // to have at least one live (non-final) segment currently
-            // attributed to the user. This prevents the state from latching
-            // onto 'speakingToScreen' when the correlator says user-speaking
-            // but STT has no user-attributed tokens yet (e.g. ambient noise
-            // + user happens to face the screen and move lips). Fall back to
-            // speakingToOther when toScreen would be true but STT lacks user
-            // attribution.
+            // Gate speakingToScreen on STT also having user-attributed text
+            // somewhere in its recent buffer — not just a *live (non-final)*
+            // segment. Short sentences can go directly from volatile to final
+            // in a single frame, and then the strict `!isFinal` check would
+            // flip the host's blue highlight (bound to .engaged /
+            // speakingToScreen) off mid-utterance while the user is still
+            // obviously talking. Accepting recent final segments as evidence
+            // of "STT believes this is user speech right now" matches the
+            // human perception: highlight should stay on while the user is
+            // clearly the source of the audio.
+            //
+            // Still requires at least one isFromUser segment (any final
+            // state) within `recentUserSegmentWindowSeconds`, so ambient-
+            // only streams don't trigger .speakingToScreen.
             if toScreen {
-                let hasLiveUserSegment = sttManager.segments.contains { seg in
-                    !seg.isFinal && seg.isFromUser && !seg.text.isEmpty
+                let recentWindow: TimeInterval = 2.0
+                let cutoff = Date().addingTimeInterval(-recentWindow)
+                    .timeIntervalSince1970
+                let hasRecentUserSegment = sttManager.segments.contains { seg in
+                    guard seg.isFromUser, !seg.text.isEmpty else { return false }
+                    // Volatile segment: always counts (user actively speaking).
+                    if !seg.isFinal { return true }
+                    // Final segment: counts if it was finalized recently.
+                    // audioEndTime is audio-stream-relative; convert to wall.
+                    let base = sttManager.audioStreamStartTime?
+                        .timeIntervalSince1970 ?? 0
+                    if let audioEnd = seg.audioEndTime {
+                        return (base + audioEnd) >= cutoff
+                    }
+                    // Missing timestamp — be permissive, count it.
+                    return true
                 }
-                return hasLiveUserSegment ? .speakingToScreen : .listening
+                return hasRecentUserSegment ? .speakingToScreen : .listening
             }
             return .speakingToOther
         }
