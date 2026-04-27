@@ -616,14 +616,76 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// the alignment (front chars end up with n=0 samples). Keep tokens whole —
     /// a row's text may be a single character, a word, or a short phrase.
     private func buildRows(from tokens: [SpeechToken], base: Double, isFinal: Bool) -> [TokenRow] {
+        // iOS SFSpeech volatile transcriptions sometimes emit multiple tokens
+        // with identical or heavily overlapping audioTimeRanges (observed:
+        // 12 consecutive tokens all sharing the same [start, end]). When that
+        // happens, every token samples the SAME audio/jaw window and produces
+        // identical sub-scores, leading to a false-positive span where the
+        // entire batch gets u+=true even though the user said none of it.
+        //
+        // Mitigation: detect clusters of tokens with >80% time overlap and
+        // linearly interpolate their ranges so each token gets a distinct
+        // sampling window. This is a best-effort fix — the interpolated
+        // times are not ground truth, but they prevent the "all tokens share
+        // one sample set" pathology.
+        let spread = spreadOverlappingTokens(tokens, base: base)
         var rows: [TokenRow] = []
-        for t in tokens {
+        for t in spread {
             let wallStart = base + t.startTime
             let wallEnd = base + t.endTime
             guard !t.text.isEmpty else { continue }
             rows.append(buildRow(text: t.text, wallStart: wallStart, wallEnd: wallEnd, isFinal: isFinal))
         }
         return rows
+    }
+
+    /// Detect clusters of tokens with heavily overlapping time ranges and
+    /// linearly interpolate their ranges so each gets a distinct window.
+    /// Returns a new array with adjusted startTime/endTime; text unchanged.
+    private func spreadOverlappingTokens(_ tokens: [SpeechToken], base: Double) -> [SpeechToken] {
+        guard tokens.count > 1 else { return tokens }
+        var result: [SpeechToken] = []
+        var i = 0
+        while i < tokens.count {
+            // Find a run of tokens that all overlap the first token by >80%.
+            let anchor = tokens[i]
+            var j = i + 1
+            while j < tokens.count {
+                let candidate = tokens[j]
+                let overlapStart = max(anchor.startTime, candidate.startTime)
+                let overlapEnd = min(anchor.endTime, candidate.endTime)
+                let overlapDur = max(0, overlapEnd - overlapStart)
+                let candidateDur = candidate.endTime - candidate.startTime
+                let ratio = candidateDur > 0 ? overlapDur / candidateDur : 0
+                if ratio < 0.8 { break }
+                j += 1
+            }
+            let clusterSize = j - i
+            if clusterSize == 1 {
+                // No overlap cluster, keep as-is.
+                result.append(tokens[i])
+                i += 1
+            } else {
+                // Cluster of size >= 2. Linearly interpolate their ranges
+                // across the union of their original ranges.
+                let unionStart = tokens[i..<j].map(\.startTime).min()!
+                let unionEnd = tokens[i..<j].map(\.endTime).max()!
+                let unionDur = unionEnd - unionStart
+                for k in 0..<clusterSize {
+                    let frac = Double(k) / Double(clusterSize)
+                    let nextFrac = Double(k + 1) / Double(clusterSize)
+                    let newStart = unionStart + frac * unionDur
+                    let newEnd = unionStart + nextFrac * unionDur
+                    result.append(SpeechToken(
+                        text: tokens[i + k].text,
+                        startTime: newStart,
+                        endTime: newEnd
+                    ))
+                }
+                i = j
+            }
+        }
+        return result
     }
 
     private func buildRow(text: String, wallStart: Double, wallEnd: Double, isFinal: Bool) -> TokenRow {
