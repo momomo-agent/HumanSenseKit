@@ -70,6 +70,29 @@ public final class UserSentenceReconstructor: ObservableObject {
         public let isUser: Bool
         public let filledBySentence: Bool
         public let isFinal: Bool
+
+        // MARK: Confidence decomposition (4/27)
+        // Independent of the boolean `isUser` verdict, these numeric signals
+        // let the UI (and downstream logic) reason about *how* confident we
+        // are that this token is the user speaking. Useful when the hard
+        // gate says yes (mouth open, looking, audio present) but the audio
+        // might actually be someone else.
+
+        /// [0, 1] — attention gate (gaze + head). Multiplicative; if the user
+        /// is clearly not looking at the device, overall confidence is zero
+        /// regardless of mouth/audio coupling.
+        public let gateScore: Float
+        /// [0, 1] — mouth motion quality. Rewards open-and-varying jaw
+        /// (speech-like), penalizes static/barely-moving mouth.
+        public let mouthScore: Float
+        /// [0, 1] — jaw-audio synchrony. The key "is it really you speaking"
+        /// signal. Combines Pearson correlation, amplitude proportionality
+        /// (jawStd ∼ volStd), and mouth motion presence. Low when audio is
+        /// loud but jaw barely moves (someone else's voice).
+        public let syncScore: Float
+        /// [0, 1] — composed confidence. `gate * (0.35*mouth + 0.65*sync)`.
+        /// High only when all three cooperate.
+        public let userConfidence: Float
     }
 
     public struct Verdict: Sendable {
@@ -345,6 +368,17 @@ public final class UserSentenceReconstructor: ObservableObject {
         let headCount = matched.filter { $0.headFwd }.count
         let gazeRatio: Float = n > 0 ? Float(gazeCount) / Float(n) : 0
         let headFwdRatio: Float = n > 0 ? Float(headCount) / Float(n) : 0
+        let maxJawVal = jaws.max() ?? 0
+        let gateScore = computeGateScore(gazeRatio: gazeRatio, headFwdRatio: headFwdRatio)
+        let mouthScore = computeMouthScore(maxJaw: maxJawVal, jawStd: jawStdVal)
+        let syncScore = computeSyncScore(
+            pearson: pearson,
+            jawStd: jawStdVal,
+            volStd: volStdVal,
+            volAvg: volAvg,
+            maxJaw: maxJawVal
+        )
+        let userConfidence = composeConfidence(gate: gateScore, mouth: mouthScore, sync: syncScore)
 
         return TokenRow(
             text: text,
@@ -368,8 +402,99 @@ public final class UserSentenceReconstructor: ObservableObject {
                 gazeRatio: gazeRatio, headFwdRatio: headFwdRatio
             ),
             filledBySentence: false,
-            isFinal: isFinal
+            isFinal: isFinal,
+            gateScore: gateScore,
+            mouthScore: mouthScore,
+            syncScore: syncScore,
+            userConfidence: userConfidence
         )
+    }
+
+    // MARK: - Confidence decomposition
+
+    /// L1 attention gate. If the user is not looking at the screen at all
+    /// (gaze + head both close to zero), this token cannot plausibly be
+    /// directed at the device, regardless of mouth/audio coupling.
+    ///
+    /// Soft ramp instead of a binary gate: a token where the user glanced
+    /// away mid-word should not hard-zero, so we smoothstep around the
+    /// existing ratio thresholds and take the product of gaze and head
+    /// factors (both must be reasonably present for the gate to open).
+    private func computeGateScore(gazeRatio: Float, headFwdRatio: Float) -> Float {
+        let gaze = smoothstep(edge0: 0.05, edge1: gazeRatioThreshold + 0.2, x: gazeRatio)
+        let head = smoothstep(edge0: 0.05, edge1: headFwdRatioThreshold + 0.2, x: headFwdRatio)
+        return gaze * head
+    }
+
+    /// L2 mouth motion. High when the mouth opens distinctly AND varies in
+    /// amplitude (as in real speech), low when the mouth is nearly static
+    /// (silence or external-speaker case) or barely open (chewing / breathing).
+    private func computeMouthScore(maxJaw: Float, jawStd: Float) -> Float {
+        let openness = smoothstep(edge0: 0.04, edge1: jawActivityThreshold + 0.08, x: maxJaw)
+        let variation = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2.5, x: jawStd)
+        // Need BOTH amplitude and variation — a wide jaw that doesn't move
+        // (yawn held open) scores low on variation and gets penalized.
+        return sqrt(max(0, openness * variation))
+    }
+
+    /// L3 jaw-audio synchrony. The signature signal of "this token is the
+    /// user speaking": when the user talks, the jaw opening and audio
+    /// amplitude rise together (positive Pearson) AND mouth motion is in
+    /// proportion to the audio loudness (jaw amplitude ∼ volume).
+    ///
+    /// The hardest false positive to kill is: someone else speaks, the user's
+    /// mouth happens to be slightly open or moving for unrelated reasons.
+    /// In that case Pearson will be near 0 or negative, and `jawStd/volStd`
+    /// will be badly out of proportion. We detect both.
+    private func computeSyncScore(
+        pearson: Float,
+        jawStd: Float,
+        volStd: Float,
+        volAvg: Float,
+        maxJaw: Float
+    ) -> Float {
+        // No meaningful audio → no sync to measure; assume silent == could
+        // still be user (e.g. the mouth motion IS the word). Neutral 0.5.
+        if volStd < 0.002 && volAvg < 0.01 { return 0.5 }
+
+        // Pearson: map [−1, +1] → [0, 1], with a bonus for positive
+        // correlation and a penalty for negative (someone else's voice while
+        // your jaw drifts the other way).
+        let pearsonScore: Float = {
+            if pearson >= 0.3 { return 1.0 }
+            if pearson >= 0.0 { return 0.3 + pearson * 2.33 }   // 0.3 → 0.3+0.7
+            return max(0, 0.3 + pearson * 0.5)                  // −0.6 → 0
+        }()
+
+        // Amplitude ratio: if audio is loud (high volStd) but mouth barely
+        // moves (low jawStd), that is the classic "someone else speaking"
+        // signature. Penalize.
+        let ampRatio: Float = {
+            if volStd < 0.003 { return 0.7 }   // quiet audio, neutral
+            let expected = volStd * 15   // rough empirical proportion
+            let deficit = max(0, expected - jawStd) / max(expected, 0.001)
+            return max(0, 1 - deficit)
+        }()
+
+        // Require some jaw motion at all — a perfectly still mouth can't be
+        // producing speech even if Pearson looks ok by chance.
+        let motionPresence = smoothstep(edge0: 0.02, edge1: 0.10, x: maxJaw)
+
+        return pearsonScore * 0.5 + ampRatio * 0.35 + motionPresence * 0.15
+    }
+
+    /// Compose the three sub-scores into a single [0, 1] confidence.
+    /// gateScore is a multiplicative gate (can hard-zero), mouth+sync are
+    /// additive with sync weighted heavier (it is the anti-impostor signal).
+    private func composeConfidence(gate: Float, mouth: Float, sync: Float) -> Float {
+        let inner = mouth * 0.35 + sync * 0.65
+        return max(0, min(1, gate * inner))
+    }
+
+    private func smoothstep(edge0: Float, edge1: Float, x: Float) -> Float {
+        guard edge1 > edge0 else { return x >= edge1 ? 1 : 0 }
+        let t = max(0, min(1, (x - edge0) / (edge1 - edge0)))
+        return t * t * (3 - 2 * t)
     }
 
     // MARK: - Math
@@ -474,7 +599,9 @@ public final class UserSentenceReconstructor: ObservableObject {
                 localPearson: row.localPearson, fusedScore: row.fusedScore,
                 gazeRatio: row.gazeRatio, headFwdRatio: row.headFwdRatio,
                 sampleCount: row.sampleCount, effectiveWindow: row.effectiveWindow,
-                isUser: true, filledBySentence: true, isFinal: row.isFinal
+                isUser: true, filledBySentence: true, isFinal: row.isFinal,
+                gateScore: row.gateScore, mouthScore: row.mouthScore,
+                syncScore: row.syncScore, userConfidence: row.userConfidence
             )
         }
     }
