@@ -318,7 +318,21 @@ public class HumanStateEngine {
 
         if isUserSpeaking {
             let toScreen = lookAt && headForward
-            return toScreen ? .speakingToScreen : .speakingToOther
+            // Additional gate for speakingToScreen: require the reconstructor
+            // to have at least one live (non-final) segment currently
+            // attributed to the user. This prevents the state from latching
+            // onto 'speakingToScreen' when the correlator says user-speaking
+            // but STT has no user-attributed tokens yet (e.g. ambient noise
+            // + user happens to face the screen and move lips). Fall back to
+            // speakingToOther when toScreen would be true but STT lacks user
+            // attribution.
+            if toScreen {
+                let hasLiveUserSegment = sttManager.segments.contains { seg in
+                    !seg.isFinal && seg.isFromUser && !seg.text.isEmpty
+                }
+                return hasLiveUserSegment ? .speakingToScreen : .listening
+            }
+            return .speakingToOther
         }
 
         if !lookAt { return .distracted }
