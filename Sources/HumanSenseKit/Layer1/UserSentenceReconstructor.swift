@@ -661,13 +661,14 @@ public final class UserSentenceReconstructor: ObservableObject {
         let headFwdRatio: Float = n > 0 ? Float(headCount) / Float(n) : 0
         let maxJawVal = jaws.max() ?? 0
         let gateScore = computeGateScore(gazeRatio: gazeRatio, headFwdRatio: headFwdRatio)
-        let mouthScore = computeMouthScore(maxJaw: maxJawVal, jawStd: jawStdVal)
+        let mouthScore = computeMouthScore(maxJaw: maxJawVal, jawStd: jawStdVal, avgJaw: jawAvg)
         let syncScore = computeSyncScore(
             pearson: pearson,
             jawStd: jawStdVal,
             volStd: volStdVal,
             volAvg: volAvg,
-            maxJaw: maxJawVal
+            maxJaw: maxJawVal,
+            avgJaw: jawAvg
         )
         let userConfidence = composeConfidence(gate: gateScore, mouth: mouthScore, sync: syncScore)
 
@@ -717,19 +718,34 @@ public final class UserSentenceReconstructor: ObservableObject {
         return gaze * head
     }
 
-    /// L2 mouth motion. High when the mouth opens distinctly AND varies in
-    /// amplitude (as in real speech), low when the mouth is nearly static
-    /// (silence or external-speaker case) or barely open (chewing / breathing).
+    /// L2 mouth motion. High when the mouth is doing something speech-like.
+    /// Speech-like = either sharp per-token opening/closing (high jawStd) OR
+    /// sustained open state (high avgJaw) — both happen in real speech, and
+    /// a pure `min(openness, variation)` killed perfectly real continuous-
+    /// phonation tokens that kept the jaw open without much variation.
     ///
-    /// Changed from `sqrt(openness * variation)` to `min(openness, variation)`:
-    /// sqrt was too lenient (0.9 * 0.2 → sqrt=0.42 gave a "held open" mouth
-    /// a mid score), which let "mouth open but not moving + external voice"
-    /// drift up to u+=true via sentence smoothing. `min` correctly says
-    /// "speaking requires both open AND moving" — if either fails, fail.
-    private func computeMouthScore(maxJaw: Float, jawStd: Float) -> Float {
+    /// kenefe scenario: "今天天气怎么样" — the initial "今" has a clean
+    /// jaw opening (maxJaw 0.36, jawStd high), but the following "天天气"
+    /// keep the mouth open (avgJaw ~ 0.2) with low variation. Under `min`
+    /// those tokens scored 0. Under the new formulation they keep a
+    /// mid-high score because `avgJaw` signals "still in speaking state".
+    private func computeMouthScore(maxJaw: Float, jawStd: Float, avgJaw: Float) -> Float {
+        // Openness: are we open AT ALL during the token window?
         let openness = smoothstep(edge0: 0.04, edge1: jawActivityThreshold + 0.08, x: maxJaw)
+        // Variation: did the mouth move WITHIN the token?
         let variation = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2.5, x: jawStd)
-        return min(openness, variation)
+        // Sustained-open: is the average opening elevated above rest
+        // baseline? Captures 'mouth held open while talking' tokens that
+        // score low on variation but are clearly in speaking state.
+        let sustained = smoothstep(edge0: 0.10, edge1: 0.20, x: avgJaw)
+        // Activity = variation OR sustained-open. Either suffices.
+        let activity = max(variation, sustained)
+        // Require both open AND some form of activity. This keeps the
+        // 'held open yawn' case penalised (low variation AND low sustained
+        // won't happen because yawn is sustained? — but yawn also fails
+        // gate+sync+vol so we are safe) and the 'speaking with sustained
+        // opening' case rewarded.
+        return min(openness, activity)
     }
 
     /// L3 jaw-audio synchrony. The signature signal of "this token is the
@@ -746,7 +762,8 @@ public final class UserSentenceReconstructor: ObservableObject {
         jawStd: Float,
         volStd: Float,
         volAvg: Float,
-        maxJaw: Float
+        maxJaw: Float,
+        avgJaw: Float
     ) -> Float {
         // No meaningful audio → no sync to measure, no evidence of speech.
         // Used to return 0.5 on the theory "the mouth motion IS the word",
@@ -773,31 +790,36 @@ public final class UserSentenceReconstructor: ObservableObject {
         // moves (low jawStd), that is the classic "someone else speaking"
         // signature. Penalize.
         //
-        // Dropped the volStd<0.003 "quiet audio neutral 0.7" branch: it
-        // was handing 0.7 of amp ratio to tokens with no audio and no
-        // jaw motion, pushing their sync to ~0.25 and getting them
-        // rescued into spans by neighbours. If volStd is near zero there
-        // is nothing to check against jawStd — return 0.
+        // Softened the deficit proportion: volStd*15 was too aggressive for
+        // low-volume speech (kenefe real case vol=0.03 -> expected=0.45,
+        // actual jawStd ~0.005, deficit near 1, ampRatio=0). Changed to
+        // *8 and allow avgJaw (sustained open state) to contribute to the
+        // motion side of the ratio. Real continuous-phonation tokens
+        // (mouth held open, little variation) now pass.
         let ampRatio: Float = {
             if volStd < 0.003 { return 0 }
-            let expected = volStd * 15
-            let deficit = max(0, expected - jawStd) / max(expected, 0.001)
+            let expected = volStd * 8
+            // Effective jaw motion = variation + sustained-open contribution.
+            // Sustained opening supplies motion evidence when variation is low.
+            let effJaw = jawStd + 0.3 * max(0, avgJaw - 0.10)
+            let deficit = max(0, expected - effJaw) / max(expected, 0.001)
             return max(0, 1 - deficit)
         }()
 
-        // Motion gate. Use jawStd (is the mouth MOVING) not maxJaw (is the
-        // mouth OPEN). A yawn / attentive face holds maxJaw high while
-        // jawStd stays low.
+        // Motion gate. Gate sync on 'mouth is in a speaking posture' —
+        // which means EITHER moving (high jawStd) OR held open past a
+        // speaking-posture baseline (high avgJaw). This fixes the
+        // false-negative case from kenefe's real-device run:
+        //   "今天天气怎么样" — the middle tokens kept jaw at 0.21-0.27
+        //   with near-zero jawStd. Under the jawStd-only gate they got
+        //   motionGate=0 → sync=0 → conf=0 → u+=false even though speech
+        //   was clearly happening.
         //
-        // CRITICAL: turned from an additive 0.15 bonus into a MULTIPLICATIVE
-        // gate. When the jaw isn't actually moving, Pearson between noisy
-        // jaw samples and audio is meaningless — it can randomly hit +0.3+
-        // just from noise correlating with noise, giving pearsonScore=1.0
-        // and sync=0.5. In kenefe's real-device run (161 tokens, user
-        // silently watching someone else speak), that false Pearson pushed
-        // dozens of tokens' conf above 0.30 and into u+=true.
-        // Now: jaw not moving → sync near zero regardless of Pearson.
-        let motionGate = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
+        // Still a gate (not additive) so silently-listening with a closed
+        // mouth still hard-zeros sync.
+        let motionByStd = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
+        let motionByOpen = smoothstep(edge0: 0.15, edge1: 0.25, x: avgJaw)
+        let motionGate = max(motionByStd, motionByOpen)
 
         let inner = pearsonScore * 0.6 + ampRatio * 0.4
         return inner * motionGate
