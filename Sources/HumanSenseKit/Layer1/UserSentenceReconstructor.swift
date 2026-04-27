@@ -104,6 +104,44 @@ public final class UserSentenceReconstructor: ObservableObject {
         /// Computed and filled in after all tokens are recorded; the row
         /// itself defaults to false on construction.
         public var isUserWithConfidence: Bool = false
+
+        /// Temporally smoothed confidence that the span extractor actually
+        /// thresholds against. Lets you see when smoothing helped (raw low,
+        /// smoothed high → inside span) or hurt (raw high, smoothed low →
+        /// outside span due to low neighbors).
+        public var smoothedConfidence: Float = 0
+
+        /// Why the span extractor decided `isUserWithConfidence` the way it
+        /// did. Critical for debugging — especially the `rescued` and
+        /// `droppedShort` cases that actively reshape the raw verdict.
+        public var spanReason: SpanReason = .belowEnter
+    }
+
+    /// Reason tag attached to every token by the span extractor. Lets the
+    /// demo (and tests) see WHY a given token ended up inside or outside
+    /// a user span, instead of just the boolean outcome.
+    public enum SpanReason: String, Sendable {
+        /// Inside a kept span and the token's own smoothed conf is above
+        /// the exit threshold — normal, unambiguous user token.
+        case inSpan
+        /// Inside a kept span BUT the token's own smoothed conf is below
+        /// exit — it was rescued by smoothing + gap tolerance. Worth
+        /// checking whether this is really the user (if not, gap tol or
+        /// smoothing window is too wide).
+        case rescued
+        /// Smoothed conf crossed enter at some point, but the raw span
+        /// that included this token was shorter than confMinSpanDurationSec
+        /// and got discarded. Check if this is actually a short user
+        /// utterance being rejected (tighten min-duration if so).
+        case droppedShort
+        /// Smoothed conf never reached enter threshold. Clearly non-user,
+        /// no span was ever opened here.
+        case belowEnter
+        /// Token was briefly inside a span that got closed by the gap-
+        /// tolerance timer. This is the token AFTER the span closed; the
+        /// tokens BEFORE the gap timed out are kept inside the span as
+        /// `inSpan` / `rescued`. Appears rarely.
+        case gapExit
     }
 
     /// A contiguous run of tokens attributed to the user by the confidence
@@ -268,19 +306,22 @@ public final class UserSentenceReconstructor: ObservableObject {
     }
 
     /// Run the Schmitt-trigger span extractor over all recorded tokens
-    /// and write `isUserWithConfidence` back into `finalizedTokens` and
-    /// `volatileTokens`. Kept internal to `recordTokens`.
+    /// and write `isUserWithConfidence`, `smoothedConfidence` and
+    /// `spanReason` back into `finalizedTokens` and `volatileTokens`.
     private func applyConfidenceSpans() {
         let all = finalizedTokens + volatileTokens
         guard !all.isEmpty else { return }
-        let flags = computeConfidenceSpanFlags(for: all)
-        // Write back. finalizedTokens first N, then volatileTokens.
+        let result = computeConfidenceSpans(for: all)
         let nFinal = finalizedTokens.count
         for i in 0..<nFinal {
-            finalizedTokens[i].isUserWithConfidence = flags[i]
+            finalizedTokens[i].isUserWithConfidence = result.flags[i]
+            finalizedTokens[i].smoothedConfidence = result.smoothed[i]
+            finalizedTokens[i].spanReason = result.reasons[i]
         }
         for j in 0..<volatileTokens.count {
-            volatileTokens[j].isUserWithConfidence = flags[nFinal + j]
+            volatileTokens[j].isUserWithConfidence = result.flags[nFinal + j]
+            volatileTokens[j].smoothedConfidence = result.smoothed[nFinal + j]
+            volatileTokens[j].spanReason = result.reasons[nFinal + j]
         }
     }
 
@@ -288,13 +329,13 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// sequence (e.g. a transcript chunk). Stateless, so callers can feed
     /// it any subset of rows (including results from another reconstructor).
     public func extractUserSpans(from rows: [TokenRow]) -> [UserSpan] {
-        let flags = computeConfidenceSpanFlags(for: rows)
+        let result = computeConfidenceSpans(for: rows)
         var spans: [UserSpan] = []
         var i = 0
         while i < rows.count {
-            guard flags[i] else { i += 1; continue }
+            guard result.flags[i] else { i += 1; continue }
             let start = i
-            while i < rows.count && flags[i] { i += 1 }
+            while i < rows.count && result.flags[i] { i += 1 }
             let end = i - 1
             let tokens = Array(rows[start...end])
             let text = tokens.map { $0.text }.joined()
@@ -312,21 +353,30 @@ public final class UserSentenceReconstructor: ObservableObject {
 
     // MARK: - Schmitt-trigger core
 
-    /// Core of the confidence-span algorithm. Returns a flag per input
-    /// row indicating whether that row lives inside a recognised user
-    /// span. Steps:
+    /// Returned tuple from the span extractor — parallel arrays covering
+    /// every input row, plus a per-row `SpanReason` that explains the
+    /// decision (critical for debugging which tokens are being rescued
+    /// or dropped, not just the final boolean).
+    private struct SpanResult {
+        let flags: [Bool]
+        let smoothed: [Float]
+        let reasons: [SpanReason]
+    }
+
+    /// Core of the confidence-span algorithm. Steps:
     ///   1. Temporal smoothing of userConfidence with exponential weights
     ///   2. Two-threshold hysteresis (enter >= 0.55, exit < 0.30)
     ///   3. Gap tolerance inside a span (<= 150ms default — absorbs
     ///      breathing, micro-pauses, one-token conf dips)
     ///   4. Drop spans shorter than 300ms (noise / single-char blips)
     ///   5. Merge spans separated by less than 400ms
-    private func computeConfidenceSpanFlags(for rows: [TokenRow]) -> [Bool] {
+    private func computeConfidenceSpans(for rows: [TokenRow]) -> SpanResult {
         let n = rows.count
-        guard n > 0 else { return [] }
+        guard n > 0 else {
+            return SpanResult(flags: [], smoothed: [], reasons: [])
+        }
 
         // --- Step 1: temporal smoothing of userConfidence ---
-        // Use midpoint time per token so token length doesn't distort weights.
         var midpoints: [Double] = []
         midpoints.reserveCapacity(n)
         for r in rows { midpoints.append((r.startTime + r.endTime) * 0.5) }
@@ -337,8 +387,6 @@ public final class UserSentenceReconstructor: ObservableObject {
         for i in 0..<n {
             var wsum: Double = 0
             var wconf: Double = 0
-            // Walk outward from i while within window. O(n) on small n; for
-            // larger n we could bisect, but typical input is 5-50 tokens.
             for k in 0..<n {
                 let dt = abs(midpoints[k] - midpoints[i])
                 if dt > window { continue }
@@ -350,13 +398,16 @@ public final class UserSentenceReconstructor: ObservableObject {
         }
 
         // --- Step 2+3: Schmitt trigger with gap tolerance ---
-        // We produce raw spans [startIdx, endIdx] (inclusive).
         struct RawSpan { var start: Int; var end: Int }
         var rawSpans: [RawSpan] = []
         var inSpan = false
         var spanStart = 0
-        var lastInIdx = 0             // last index that was clearly inside
+        var lastInIdx = 0
         var belowStartTime: Double? = nil
+        // Track tokens that sat briefly inside a span before it closed.
+        // These are the 'gapExit' tokens — they appear AFTER the span
+        // was closed, i.e. the low-conf tail that triggered the exit.
+        var gapExitIndices: Set<Int> = []
 
         for i in 0..<n {
             let s = smoothed[i]
@@ -371,16 +422,18 @@ public final class UserSentenceReconstructor: ObservableObject {
                 }
             } else {
                 if s < confExitThreshold {
-                    // Start of a possible gap.
                     if belowStartTime == nil { belowStartTime = t }
                     if let bs = belowStartTime, t - bs > confGapToleranceSec {
-                        // Gap too long → close span at lastInIdx.
+                        // Gap too long → close span at lastInIdx. Tokens
+                        // between lastInIdx+1 and i are gap-exit tokens.
                         rawSpans.append(RawSpan(start: spanStart, end: lastInIdx))
+                        if lastInIdx + 1 <= i {
+                            for k in (lastInIdx + 1)...i { gapExitIndices.insert(k) }
+                        }
                         inSpan = false
                         belowStartTime = nil
                     }
                 } else {
-                    // Back above exit threshold — reset gap, extend span.
                     belowStartTime = nil
                     lastInIdx = i
                 }
@@ -390,11 +443,17 @@ public final class UserSentenceReconstructor: ObservableObject {
             rawSpans.append(RawSpan(start: spanStart, end: lastInIdx))
         }
 
-        // --- Step 4: drop short spans ---
+        // --- Step 4: drop short spans — remember which indices were in
+        // a raw span that got dropped so we can mark them `droppedShort`.
         var kept: [RawSpan] = []
+        var droppedShortIndices: Set<Int> = []
         for sp in rawSpans {
             let dur = rows[sp.end].endTime - rows[sp.start].startTime
-            if dur >= confMinSpanDurationSec { kept.append(sp) }
+            if dur >= confMinSpanDurationSec {
+                kept.append(sp)
+            } else {
+                for k in sp.start...sp.end { droppedShortIndices.insert(k) }
+            }
         }
 
         // --- Step 5: merge close spans ---
@@ -409,12 +468,38 @@ public final class UserSentenceReconstructor: ObservableObject {
             }
         }
 
-        // --- Build flags ---
+        // --- Build flags + reasons ---
         var flags = [Bool](repeating: false, count: n)
+        var reasons = [SpanReason](repeating: .belowEnter, count: n)
+
+        // Mark all tokens inside kept spans as inSpan by default. Downgrade
+        // to `rescued` if their own smoothed conf is below exit threshold
+        // (they were carried by neighbors + gap tolerance).
         for sp in merged {
-            for k in sp.start...sp.end { flags[k] = true }
+            for k in sp.start...sp.end {
+                flags[k] = true
+                if smoothed[k] < confExitThreshold {
+                    reasons[k] = .rescued
+                } else {
+                    reasons[k] = .inSpan
+                }
+            }
         }
-        return flags
+
+        // Now apply the rejection reasons for tokens that did NOT end up
+        // inside a kept span. Order matters: droppedShort > gapExit >
+        // belowEnter (priority of explanation).
+        for k in 0..<n where !flags[k] {
+            if droppedShortIndices.contains(k) {
+                reasons[k] = .droppedShort
+            } else if gapExitIndices.contains(k) {
+                reasons[k] = .gapExit
+            } else {
+                reasons[k] = .belowEnter
+            }
+        }
+
+        return SpanResult(flags: flags, smoothed: smoothed, reasons: reasons)
     }
 
     public func clear() {
@@ -635,12 +720,16 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// L2 mouth motion. High when the mouth opens distinctly AND varies in
     /// amplitude (as in real speech), low when the mouth is nearly static
     /// (silence or external-speaker case) or barely open (chewing / breathing).
+    ///
+    /// Changed from `sqrt(openness * variation)` to `min(openness, variation)`:
+    /// sqrt was too lenient (0.9 * 0.2 → sqrt=0.42 gave a "held open" mouth
+    /// a mid score), which let "mouth open but not moving + external voice"
+    /// drift up to u+=true via sentence smoothing. `min` correctly says
+    /// "speaking requires both open AND moving" — if either fails, fail.
     private func computeMouthScore(maxJaw: Float, jawStd: Float) -> Float {
         let openness = smoothstep(edge0: 0.04, edge1: jawActivityThreshold + 0.08, x: maxJaw)
         let variation = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2.5, x: jawStd)
-        // Need BOTH amplitude and variation — a wide jaw that doesn't move
-        // (yawn held open) scores low on variation and gets penalized.
-        return sqrt(max(0, openness * variation))
+        return min(openness, variation)
     }
 
     /// L3 jaw-audio synchrony. The signature signal of "this token is the
@@ -666,10 +755,15 @@ public final class UserSentenceReconstructor: ObservableObject {
         // Pearson: map [−1, +1] → [0, 1], with a bonus for positive
         // correlation and a penalty for negative (someone else's voice while
         // your jaw drifts the other way).
+        //
+        // Lowered the pearson=0 floor from 0.3 to 0.1. When jaw barely moves,
+        // `localPearson` returns 0 (guard at jawStd > 0.0005) — that's a
+        // no-information case, not a mid-confidence case. A 0.3 floor was
+        // giving a free 0.15 to the sync score for non-speaking mouths.
         let pearsonScore: Float = {
             if pearson >= 0.3 { return 1.0 }
-            if pearson >= 0.0 { return 0.3 + pearson * 2.33 }   // 0.3 → 0.3+0.7
-            return max(0, 0.3 + pearson * 0.5)                  // −0.6 → 0
+            if pearson >= 0.0 { return 0.1 + pearson * 3.0 }    // 0.0→0.1, 0.3→1.0
+            return max(0, 0.1 + pearson * 0.166)                // −0.6 → 0
         }()
 
         // Amplitude ratio: if audio is loud (high volStd) but mouth barely
@@ -684,7 +778,12 @@ public final class UserSentenceReconstructor: ObservableObject {
 
         // Require some jaw motion at all — a perfectly still mouth can't be
         // producing speech even if Pearson looks ok by chance.
-        let motionPresence = smoothstep(edge0: 0.02, edge1: 0.10, x: maxJaw)
+        //
+        // CHANGED: use jawStd (is the mouth MOVING) not maxJaw (is the mouth
+        // OPEN). A yawn holds maxJaw high while jawStd stays low, which was
+        // giving "held open" tokens the full 0.15 motion bonus and pushing
+        // their conf over the u+ exit threshold.
+        let motionPresence = smoothstep(edge0: jawStdThreshold * 0.5, edge1: jawStdThreshold * 2, x: jawStd)
 
         return pearsonScore * 0.5 + ampRatio * 0.35 + motionPresence * 0.15
     }
