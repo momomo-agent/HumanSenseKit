@@ -26,6 +26,20 @@ public class HumanSenseKit {
         set { engine.onARFrame = newValue }
     }
 
+    /// Prefer a wide-angle (ultra-wide / Center Stage) front-camera
+    /// video format for ARKit face tracking when available. Defaults
+    /// to `true` — on iPhone 15 Pro / 17 Pro this selects a much
+    /// wider FOV than the ARKit default. Silently ignored on devices
+    /// that don't advertise an ultra-wide ARVideoFormat.
+    ///
+    /// Must be set before `start(session:)` for it to take effect on
+    /// the initial configuration; changing it mid-session requires a
+    /// stop/start cycle.
+    public var preferWideAngleCamera: Bool {
+        get { engine.faceManager.preferWideAngle }
+        set { engine.faceManager.preferWideAngle = newValue }
+    }
+
     /// Start sensing. Optionally provide a shared ARSession.
     /// If nil, HumanSenseKit creates its own.
     public func start(session: ARSession? = nil) {

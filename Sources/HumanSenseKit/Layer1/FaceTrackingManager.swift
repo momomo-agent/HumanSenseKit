@@ -37,6 +37,19 @@ public class FaceTrackingManager: NSObject, ObservableObject {
 
     public weak var handManager: HandGestureManager?
 
+    /// When true, prefer a wide-angle front-camera video format for
+    /// face tracking so the effective FOV is large enough to keep the
+    /// user in frame even when they sit close to the device.
+    ///
+    /// On iPhone 15 Pro / 17 Pro, the front camera exposes a Center
+    /// Stage ultra-wide sensor that `ARFaceTrackingConfiguration.
+    /// supportedVideoFormats` lists with `captureDeviceType ==
+    /// .builtInUltraWideCamera`. When available, picking that format
+    /// roughly doubles the horizontal FOV vs the default narrow format.
+    /// Falls back to the default ARKit-picked format on older devices
+    /// or when no wide-angle format is advertised.
+    public var preferWideAngle: Bool = true
+
     public override init() {
         super.init()
     }
@@ -53,8 +66,35 @@ public class FaceTrackingManager: NSObject, ObservableObject {
         let config = ARFaceTrackingConfiguration()
         config.worldAlignment = .camera
         config.providesAudioData = false
+        applyVideoFormat(to: config)
         session.delegate = self
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    /// Select a preferred `ARVideoFormat` for the given configuration
+    /// based on `preferWideAngle`. No-op when no wide-angle format is
+    /// advertised (keeps ARKit's default).
+    private func applyVideoFormat(to config: ARFaceTrackingConfiguration) {
+        guard preferWideAngle else {
+            NSLog("[FaceTracking] preferWideAngle=false, using ARKit default format")
+            return
+        }
+        let formats = ARFaceTrackingConfiguration.supportedVideoFormats
+        // iOS 16+ exposes captureDeviceType on ARVideoFormat. On older
+        // OS this whole block simply won't find a match and we fall
+        // back to the default.
+        if #available(iOS 16.0, *) {
+            // Prefer ultra-wide (Center Stage camera on 15 Pro / 17 Pro).
+            if let wide = formats.first(where: { $0.captureDeviceType == .builtInUltraWideCamera }) {
+                config.videoFormat = wide
+                NSLog("[FaceTracking] Selected wide-angle format: %@ %dx%d @ %d fps",
+                      String(describing: wide.captureDeviceType),
+                      Int(wide.imageResolution.width), Int(wide.imageResolution.height),
+                      wide.framesPerSecond)
+                return
+            }
+        }
+        NSLog("[FaceTracking] No ultra-wide format advertised, using ARKit default")
     }
 
     /// Legacy convenience — creates its own ARSession if none provided.
