@@ -48,7 +48,13 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     /// roughly doubles the horizontal FOV vs the default narrow format.
     /// Falls back to the default ARKit-picked format on older devices
     /// or when no wide-angle format is advertised.
-    public var preferWideAngle: Bool = true
+    ///
+    /// Default `false` because some face tracking signals (e.g.
+    /// `isLookingAtScreen` gaze estimation, head orientation) are
+    /// calibrated against the narrow default format — switching to
+    /// ultra-wide can bias those signals. Consumers can opt in via
+    /// the public `HumanSenseKit.preferWideAngleCamera` setter.
+    public var preferWideAngle: Bool = false
 
     public override init() {
         super.init()
