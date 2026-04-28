@@ -205,12 +205,17 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        // Track resting baseline
+        // Track resting baseline - only update when audio is quiet (not speaking)
+        // This prevents the baseline from tracking speech activity and zeroing out the signal
         if !baselineInitialized {
             lipBaseline = activity
             baselineInitialized = true
         } else {
-            lipBaseline = baselineAlpha * activity + (1 - baselineAlpha) * lipBaseline
+            // Only adapt baseline when audio is quiet (RMS < 0.001)
+            // This keeps the baseline at the resting state, not the speaking state
+            if audioRMS < 0.001 {
+                lipBaseline = baselineAlpha * activity + (1 - baselineAlpha) * lipBaseline
+            }
         }
 
         let lipDeviation = max(0, activity - lipBaseline)
