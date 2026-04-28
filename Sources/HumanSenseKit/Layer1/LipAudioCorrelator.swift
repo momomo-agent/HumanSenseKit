@@ -347,6 +347,22 @@ public class LipAudioCorrelator {
             lines.append(String(format: "%d,%.4f,%.5f", tMs, e.lipStd, e.audioStd))
         }
         lines.append("# n=\(envs.count) r=\(String(format: "%.3f", correlation)) lipVar=\(String(format: "%.6f", lipVariance)) both=\(bothCount) lipOnly=\(lipOnlyCount) audioOnly=\(audioOnlyCount)")
+        
+        // Diagnostic: if lipStd is all zeros, dump raw sample data
+        let allLipZero = envs.allSatisfy { $0.lipStd < 0.001 }
+        if allLipZero && !samples.isEmpty {
+            lines.append("# WARNING: lipStd all zero — raw sample dump:")
+            lines.append("# t_ms,lipDev,audioRMS")
+            for s in samples.prefix(20) {
+                let tMs = Int((s.timestamp - baseTime) * 1000)
+                lines.append(String(format: "# %d,%.4f,%.5f", tMs, s.lipDeviation, s.audioRMS))
+            }
+            if samples.count > 20 {
+                lines.append("# ... (\(samples.count - 20) more samples)")
+            }
+            lines.append("# lipBaseline=\(String(format: "%.4f", lipBaseline))")
+        }
+        
         return lines.joined(separator: "\n")
     }
 

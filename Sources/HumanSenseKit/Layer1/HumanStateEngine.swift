@@ -305,13 +305,15 @@ public class HumanStateEngine {
         let now = Date()
         if now.timeIntervalSince(lastDiagLog) > 0.5 {
             print(String(format:
-                "[HSE] voice=%@ corr=%@(%.2f) sessSpk=%@ lookAt=%@ headFwd=%@",
+                "[HSE] voice=%@ corr=%@(%.2f) sessSpk=%@ lookAt=%@ headFwd=%@ | audioRMS=%.5f sttVAD=%@",
                 voiceActive ? "✓" : "·",
                 isCorrNow ? "✓" : "·",
                 lipAudioCorrelator.correlation,
                 sessionIsUserSpeaking ? "✓" : "·",
                 lookAt ? "✓" : "·",
-                headForward ? "✓" : "·"))
+                headForward ? "✓" : "·",
+                audio.volume,
+                sttManager.speechDetected ? "✓" : "·"))
             lastDiagLog = now
         }
 
