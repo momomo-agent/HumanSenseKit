@@ -2,6 +2,7 @@
 import Foundation
 import ARKit
 import Combine
+import UIKit
 
 @MainActor
 @Observable
@@ -35,6 +36,10 @@ public class HumanStateEngine {
     private var lastDiagLog: Date = .distantPast
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
+
+    // 应用生命周期监听
+    private var isStarted = false
+    private var providedSession: ARSession?
 
     // Speech session tracker — judges "is this the user speaking?" from the
     // moment voice activity starts, not when STT emits text.
@@ -109,10 +114,14 @@ public class HumanStateEngine {
         }
 
         setupBindings()
+        setupLifecycleObservers()
     }
 
     public func start(session: ARSession? = nil) {
         NSLog("[Engine] start() called, session=%@", session != nil ? "provided" : "nil")
+        isStarted = true
+        providedSession = session
+
         // Start ARKit first — it reconfigures AVAudioSession
         if let session {
             faceManager.start(session: session)
@@ -120,7 +129,7 @@ public class HumanStateEngine {
             faceManager.start()
         }
         deviceMotionManager.start()
-        
+
         NSLog("[Engine] Subscribing to arSessionReady (current=%d)", faceManager.arSessionReady ? 1 : 0)
         // Start STT only after ARKit is fully running (first frame received).
         // This ensures ARKit's audio session reconfiguration is done before
@@ -136,10 +145,40 @@ public class HumanStateEngine {
     }
 
     public func stop() {
+        isStarted = false
         faceManager.stop()
         audioManager.stop()
         deviceMotionManager.stop()
         sttManager.stop()
+    }
+
+    // MARK: - Lifecycle Observers
+
+    private func setupLifecycleObservers() {
+        // 监听应用进入前台
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            NSLog("[Engine] App entering foreground, isStarted=%d", self.isStarted ? 1 : 0)
+            if self.isStarted {
+                // 重新启动
+                self.start(session: self.providedSession)
+            }
+        }
+
+        // 监听应用进入后台（可选：停止以节省资源）
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            NSLog("[Engine] App entering background")
+            // 可以选择停止，但保留 isStarted 标志
+            // self?.stop()
+        }
     }
 
     // MARK: - Private
