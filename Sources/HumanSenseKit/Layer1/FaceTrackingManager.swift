@@ -151,7 +151,11 @@ extension FaceTrackingManager: ARSessionDelegate {
 
         noFaceFrames = 0
 
-        if !anchor.isTracked {
+        // Extract blendShapes even when !isTracked, so LipAudioCorrelator
+        // gets real-time lip movement data for speech detection.
+        // Only skip full state update if untracked for too long.
+        let isTracked = anchor.isTracked
+        if !isTracked {
             untrackedFrames += 1
             if untrackedFrames >= noFaceThreshold {
                 Task { @MainActor in
@@ -159,9 +163,10 @@ extension FaceTrackingManager: ARSessionDelegate {
                     self.faceState.isLookingAtScreen = false
                 }
             }
-            return
+            // Continue to extract blendShapes even when untracked
+        } else {
+            untrackedFrames = 0
         }
-        untrackedFrames = 0
 
         // --- All extraction done synchronously on ARKit's delegate thread ---
         // No async queue = no closures retaining ARFrame
