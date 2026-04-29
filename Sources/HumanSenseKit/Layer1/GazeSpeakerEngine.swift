@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import AVFoundation
+import Combine
 
 /// High-level speaker diarization engine that wraps GazeSpeakerAttributor.
 /// Manages calibration flow, STT token processing, transcript segments,
@@ -162,6 +163,7 @@ public class GazeSpeakerEngine {
 
     private let engine: HumanStateEngine
     private var attributor: GazeSpeakerAttributor?
+    private var attributorCancellables = Set<AnyCancellable>()
     private var audioStreamStartTime: Date?
 
     private let logFileURL: URL = {
@@ -176,6 +178,7 @@ public class GazeSpeakerEngine {
 
         Task { @MainActor in
             self.attributor = GazeSpeakerAttributor()
+            self.observeAttributor()
             self.setupSTTListener()
             self.setupAudioStream()
             self.syncFromAttributor()
@@ -188,6 +191,31 @@ public class GazeSpeakerEngine {
             phase = .live
             debugInfo.userEmbeddingStatus = "✅ 已加载 (\(attributor.embeddingCount) 个样本)"
         }
+    }
+
+    /// Observe attributor @Published changes to keep engine state in sync.
+    private func observeAttributor() {
+        guard let attributor = attributor else { return }
+
+        attributor.$isCalibrating
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] calibrating in
+                guard let self else { return }
+                self.isCalibrating = calibrating
+                self.calibrationProgress = attributor.calibrationProgress
+                switch attributor.phase {
+                case .calibration: self.phase = .calibration
+                case .live: self.phase = .live
+                }
+                if attributor.hasEmbedding {
+                    self.debugInfo.userEmbeddingStatus = "✅ 已标定 (\(attributor.embeddingCount) 个样本)"
+                } else if calibrating {
+                    self.debugInfo.userEmbeddingStatus = "标定中 (\(attributor.currentCalibrationSentence + 1)/\(attributor.calibrationSentences.count))..."
+                } else {
+                    self.debugInfo.userEmbeddingStatus = "未标定"
+                }
+            }
+            .store(in: &attributorCancellables)
     }
 
     /// Auto-wire STTManager's audio stream for embedding extraction.
