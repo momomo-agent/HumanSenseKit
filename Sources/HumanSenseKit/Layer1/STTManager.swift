@@ -56,6 +56,10 @@ public class STTManager: NSObject, ObservableObject {
     /// Use this to feed GazeSpeakerEngine.processAudioBuffer() for diarization.
     public var onAudioSamples: ((_ samples: [Float]) -> Void)?
 
+    /// Lazy-init resampler to convert mic buffers to 16kHz mono for speaker embedding.
+    /// Accessed from audio tap thread (nonisolated).
+    private let diarizationResampler = DiarizationResampler()
+
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
         get { builder.captureSignals }
@@ -228,6 +232,12 @@ public class STTManager: NSObject, ObservableObject {
 
     // MARK: - Wiring
 
+    /// Resample a mic buffer to 16kHz mono Float32 for speaker embedding.
+    /// Runs on the audio tap thread; must be thread-safe.
+    private nonisolated func resampleForDiarization(_ buffer: AVAudioPCMBuffer) -> [Float]? {
+        return diarizationResampler.resample(buffer)
+    }
+
     private func wireUp() {
         // Capture sub-components directly — avoid accessing @MainActor self from audio thread
         let speech = self.speech
@@ -240,15 +250,11 @@ public class STTManager: NSObject, ObservableObject {
             Task { @MainActor in
                 audioDetection?.processBuffer(buffer)
             }
-            // Forward raw samples for speaker diarization
+            // Forward raw samples for speaker diarization (resampled to 16kHz mono Float32)
             if let onSamples = self?.onAudioSamples,
-               let channelData = buffer.floatChannelData {
-                let frameLength = Int(buffer.frameLength)
-                if frameLength > 0 {
-                    let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
-                    Task { @MainActor in
-                        onSamples(samples)
-                    }
+               let resampled = self?.resampleForDiarization(buffer) {
+                Task { @MainActor in
+                    onSamples(resampled)
                 }
             }
         }
