@@ -316,9 +316,9 @@ extension FaceTrackingManager: ARSessionDelegate {
     }
 
     nonisolated public func sessionInterruptionEnded(_ session: ARSession) {
-        NSLog("[FaceTracking] ARSession interruption ended, restarting")
+        NSLog("[FaceTracking] ARSession interruption ended, restarting on same session")
         Task { @MainActor in
-            self.start()
+            self.start(session: session)
         }
     }
 }
