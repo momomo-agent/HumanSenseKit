@@ -151,7 +151,9 @@ public class GazeSpeakerEngine {
         set { attributor?.learningRate = newValue }
     }
     public var learningCount: Int { attributor?.learningCount ?? 0 }
-    public var currentCalibrationSentence: Int { attributor?.currentCalibrationSentence ?? 0 }
+    /// Mirror of attributor.currentCalibrationSentence — kept as stored @Observable
+    /// property so SwiftUI re-renders when it advances between calibration steps.
+    public var currentCalibrationSentence: Int = 0
     public var calibrationSentences: [String] { attributor?.calibrationSentences ?? [] }
 
     // MARK: - Callback
@@ -202,7 +204,6 @@ public class GazeSpeakerEngine {
             .sink { [weak self] calibrating in
                 guard let self else { return }
                 self.isCalibrating = calibrating
-                self.calibrationProgress = attributor.calibrationProgress
                 switch attributor.phase {
                 case .calibration: self.phase = .calibration
                 case .live: self.phase = .live
@@ -214,6 +215,24 @@ public class GazeSpeakerEngine {
                 } else {
                     self.debugInfo.userEmbeddingStatus = "未标定"
                 }
+            }
+            .store(in: &attributorCancellables)
+
+        attributor.$currentCalibrationSentence
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] idx in
+                guard let self else { return }
+                self.currentCalibrationSentence = idx
+                if self.isCalibrating, !attributor.hasEmbedding {
+                    self.debugInfo.userEmbeddingStatus = "标定中 (\(idx + 1)/\(attributor.calibrationSentences.count))..."
+                }
+            }
+            .store(in: &attributorCancellables)
+
+        attributor.$calibrationProgress
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] progress in
+                self?.calibrationProgress = progress
             }
             .store(in: &attributorCancellables)
     }
