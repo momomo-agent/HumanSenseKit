@@ -59,6 +59,7 @@ public class STTManager: NSObject, ObservableObject {
     /// Lazy-init resampler to convert mic buffers to 16kHz mono for speaker embedding.
     /// Accessed from audio tap thread (nonisolated).
     private let diarizationResampler = DiarizationResampler()
+    private nonisolated(unsafe) var diarizationWarned = false
 
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
@@ -251,10 +252,17 @@ public class STTManager: NSObject, ObservableObject {
                 audioDetection?.processBuffer(buffer)
             }
             // Forward raw samples for speaker diarization (resampled to 16kHz mono Float32)
-            if let onSamples = self?.onAudioSamples,
-               let resampled = self?.resampleForDiarization(buffer) {
-                Task { @MainActor in
-                    onSamples(resampled)
+            if let onSamples = self?.onAudioSamples {
+                if let resampled = self?.resampleForDiarization(buffer) {
+                    Task { @MainActor in
+                        onSamples(resampled)
+                    }
+                } else {
+                    // One-time warning to avoid flooding logs
+                    if self?.diarizationWarned == false {
+                        self?.diarizationWarned = true
+                        NSLog("[STTManager] resampleForDiarization returned nil (inputFormat=%@)", "\(buffer.format)")
+                    }
                 }
             }
         }

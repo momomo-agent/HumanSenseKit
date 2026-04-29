@@ -171,7 +171,6 @@ public class GazeSpeakerAttributor: ObservableObject {
             processCalibrationAudio(samples)
             return
         }
-
         audioBufferQueue.append(samples)
         if audioBufferQueue.count > bufferWindowSize {
             audioBufferQueue.removeFirst()
@@ -261,6 +260,13 @@ public class GazeSpeakerAttributor: ObservableObject {
         let totalProgress = (Float(currentCalibrationSentence) + Float(min(elapsed / calibrationDuration, 1.0))) / Float(calibrationSentences.count)
         calibrationProgress = totalProgress
         calibrationAudioBuffers.append(samples)
+
+        // Debug: log every ~1s
+        let totalSamples = calibrationAudioBuffers.reduce(0) { $0 + $1.count }
+        if Int(elapsed * 10) % 10 == 0 && totalSamples % 16000 < 1600 {
+            NSLog("[GazeSpeakerAttributor] calibration buffer: elapsed=%.2fs totalSamples=%d (need ≥1s@16kHz=16000)", elapsed, totalSamples)
+        }
+
         if elapsed >= calibrationDuration {
             finishCurrentSentence()
         }
@@ -268,7 +274,9 @@ public class GazeSpeakerAttributor: ObservableObject {
 
     private func finishCurrentSentence() {
         let allSamples = calibrationAudioBuffers.flatMap { $0 }
+        NSLog("[GazeSpeakerAttributor] finishCurrentSentence: sentence=%d samples=%d", currentCalibrationSentence, allSamples.count)
         guard let extractor = embeddingExtractor else {
+            NSLog("[GazeSpeakerAttributor] NO EXTRACTOR — bailing")
             isCalibrating = false
             return
         }
@@ -276,9 +284,11 @@ public class GazeSpeakerAttributor: ObservableObject {
             let embedding = try extractor.extract(from: allSamples)
             calibrationEmbeddings.append(embedding)
             currentCalibrationSentence += 1
+            NSLog("[GazeSpeakerAttributor] extracted embedding size=%d, advanced to sentence=%d", embedding.count, currentCalibrationSentence)
             if currentCalibrationSentence < calibrationSentences.count {
                 calibrationAudioBuffers = []
                 calibrationStartTime = Date()
+                NSLog("[GazeSpeakerAttributor] ready for next sentence")
             } else {
                 finishCalibration()
             }
