@@ -342,9 +342,13 @@ public class GazeSpeakerAttributor: ObservableObject {
     // MARK: - Private: Sensor Queries
 
     private func querySpeakerAtTime(_ audioTime: Double) -> (Bool, Float) {
-        guard !speakerHistory.isEmpty else { return (false, 1.0) }
+        guard !speakerHistory.isEmpty else {
+            // No embedding data yet (first ~1s of audio) — return neutral score
+            // so jaw/gaze signals can decide without embedding penalty
+            return (false, 0.45)
+        }
         let closest = speakerHistory.min(by: { abs($0.timestamp - audioTime) < abs($1.timestamp - audioTime) })
-        guard let record = closest else { return (false, 1.0) }
+        guard let record = closest else { return (false, 0.45) }
         return (record.distance < speakerThreshold, record.distance)
     }
 
