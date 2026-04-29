@@ -191,6 +191,7 @@ public class GazeSpeakerAttributor: ObservableObject {
         calibrationEmbeddings = []
         currentCalibrationSentence = 0
         calibrationStartTime = Date()
+        DiarizationDebugLog.write("=== startCalibration ===")
     }
 
     public func startAdditionalCalibration() {
@@ -265,6 +266,7 @@ public class GazeSpeakerAttributor: ObservableObject {
         let totalSamples = calibrationAudioBuffers.reduce(0) { $0 + $1.count }
         if Int(elapsed * 10) % 10 == 0 && totalSamples % 16000 < 1600 {
             NSLog("[GazeSpeakerAttributor] calibration buffer: elapsed=%.2fs totalSamples=%d (need ≥1s@16kHz=16000)", elapsed, totalSamples)
+            DiarizationDebugLog.write("cal: sentence=\(currentCalibrationSentence) elapsed=\(String(format: "%.2f", elapsed))s totalSamples=\(totalSamples)")
         }
 
         if elapsed >= calibrationDuration {
@@ -275,8 +277,10 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func finishCurrentSentence() {
         let allSamples = calibrationAudioBuffers.flatMap { $0 }
         NSLog("[GazeSpeakerAttributor] finishCurrentSentence: sentence=%d samples=%d", currentCalibrationSentence, allSamples.count)
+        DiarizationDebugLog.write("finishCurrentSentence: sentence=\(currentCalibrationSentence) samples=\(allSamples.count)")
         guard let extractor = embeddingExtractor else {
             NSLog("[GazeSpeakerAttributor] NO EXTRACTOR — bailing")
+            DiarizationDebugLog.write("NO EXTRACTOR")
             isCalibrating = false
             return
         }
@@ -285,6 +289,7 @@ public class GazeSpeakerAttributor: ObservableObject {
             calibrationEmbeddings.append(embedding)
             currentCalibrationSentence += 1
             NSLog("[GazeSpeakerAttributor] extracted embedding size=%d, advanced to sentence=%d", embedding.count, currentCalibrationSentence)
+            DiarizationDebugLog.write("extracted embedding size=\(embedding.count) advanced to sentence=\(currentCalibrationSentence)")
             if currentCalibrationSentence < calibrationSentences.count {
                 calibrationAudioBuffers = []
                 calibrationStartTime = Date()
@@ -294,6 +299,7 @@ public class GazeSpeakerAttributor: ObservableObject {
             }
         } catch {
             NSLog("[GazeSpeakerAttributor] Calibration sentence failed: %@", error.localizedDescription)
+            DiarizationDebugLog.write("CALIBRATION FAILED: \(error.localizedDescription)")
             isCalibrating = false
         }
     }

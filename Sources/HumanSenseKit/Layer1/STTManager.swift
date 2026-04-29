@@ -60,6 +60,7 @@ public class STTManager: NSObject, ObservableObject {
     /// Accessed from audio tap thread (nonisolated).
     private let diarizationResampler = DiarizationResampler()
     private nonisolated(unsafe) var diarizationWarned = false
+    private nonisolated(unsafe) var diarizationFirstForwardLogged = false
 
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
@@ -254,14 +255,19 @@ public class STTManager: NSObject, ObservableObject {
             // Forward raw samples for speaker diarization (resampled to 16kHz mono Float32)
             if let onSamples = self?.onAudioSamples {
                 if let resampled = self?.resampleForDiarization(buffer) {
+                    if self?.diarizationFirstForwardLogged == false {
+                        self?.diarizationFirstForwardLogged = true
+                        NSLog("[STTManager] first resampled buffer: %d samples", resampled.count)
+                        DiarizationDebugLog.write("first resampled forward: \(resampled.count) samples; input format=\(buffer.format)")
+                    }
                     Task { @MainActor in
                         onSamples(resampled)
                     }
                 } else {
-                    // One-time warning to avoid flooding logs
                     if self?.diarizationWarned == false {
                         self?.diarizationWarned = true
                         NSLog("[STTManager] resampleForDiarization returned nil (inputFormat=%@)", "\(buffer.format)")
+                        DiarizationDebugLog.write("resampleForDiarization nil: format=\(buffer.format)")
                     }
                 }
             }
