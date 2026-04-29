@@ -52,6 +52,10 @@ public class STTManager: NSObject, ObservableObject {
     /// Combine with `audioStreamStartTime` to align with wall-clock signals.
     public var onTokens: ((_ tokens: [SpeechToken], _ isFinal: Bool) -> Void)?
 
+    /// Called with raw audio samples (16kHz mono Float32) from the mic tap.
+    /// Use this to feed GazeSpeakerEngine.processAudioBuffer() for diarization.
+    public var onAudioSamples: ((_ samples: [Float]) -> Void)?
+
     /// Set a closure to capture signal snapshots for debug display on each segment.
     public var captureSignals: (() -> SpeechSegment.SignalSnapshot)? {
         get { builder.captureSignals }
@@ -235,6 +239,17 @@ public class STTManager: NSObject, ObservableObject {
             speech.appendBuffer(buffer)
             Task { @MainActor in
                 audioDetection?.processBuffer(buffer)
+            }
+            // Forward raw samples for speaker diarization
+            if let onSamples = self?.onAudioSamples,
+               let channelData = buffer.floatChannelData {
+                let frameLength = Int(buffer.frameLength)
+                if frameLength > 0 {
+                    let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
+                    Task { @MainActor in
+                        onSamples(samples)
+                    }
+                }
             }
         }
 

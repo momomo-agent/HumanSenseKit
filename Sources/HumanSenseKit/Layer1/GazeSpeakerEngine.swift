@@ -177,6 +177,7 @@ public class GazeSpeakerEngine {
         Task { @MainActor in
             self.attributor = GazeSpeakerAttributor()
             self.setupSTTListener()
+            self.setupAudioStream()
             self.syncFromAttributor()
         }
     }
@@ -186,6 +187,13 @@ public class GazeSpeakerEngine {
         if attributor.hasEmbedding {
             phase = .live
             debugInfo.userEmbeddingStatus = "✅ 已加载 (\(attributor.embeddingCount) 个样本)"
+        }
+    }
+
+    /// Auto-wire STTManager's audio stream for embedding extraction.
+    private func setupAudioStream() {
+        engine.sttManager.onAudioSamples = { [weak self] samples in
+            self?.processAudioBuffer(samples)
         }
     }
 
