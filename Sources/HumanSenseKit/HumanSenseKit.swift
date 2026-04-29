@@ -10,7 +10,8 @@ public class HumanSenseKit {
     public let observer: HumanSenseObserver
     public let sttManager: STTManager
     
-    private let engine: HumanStateEngine
+    /// The underlying engine. Exposed for GazeSpeakerEngine and advanced consumers.
+    public let engine: HumanStateEngine
     
     public init(enableHandGestures: Bool = false, enableSTT: Bool = true) {
         self.engine = HumanStateEngine()
