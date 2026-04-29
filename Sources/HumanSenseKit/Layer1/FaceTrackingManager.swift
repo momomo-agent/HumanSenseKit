@@ -64,6 +64,8 @@ public class FaceTrackingManager: NSObject, ObservableObject {
     /// FaceTrackingManager becomes its delegate and configures face tracking.
     public func start(session: ARSession) {
         self.arSession = session
+        self.hasSignaledReady = false
+        self.arSessionReady = false
         guard ARFaceTrackingConfiguration.isSupported else {
             NSLog("[FaceTracking] ARFaceTracking NOT supported on this device")
             return
@@ -316,13 +318,20 @@ extension FaceTrackingManager: ARSessionDelegate {
     }
 
     nonisolated public func sessionInterruptionEnded(_ session: ARSession) {
-        NSLog("[FaceTracking] ARSession interruption ended, restarting on same session")
-        // ARSession is not Sendable — use nonisolated(unsafe) capture to
-        // cross isolation boundary. Safe because ARKit guarantees this
-        // callback fires on the delegate queue and we only read `session`.
+        NSLog("[FaceTracking] ARSession interruption ended")
+        // Only restart if this is still our active session.
+        // When the app returns from background, HumanStateEngine.willEnterForeground
+        // may have already called start() which creates a new session.
+        // If we blindly restart the old session here, we'd overwrite the delegate
+        // and the new session's face data would be lost.
         nonisolated(unsafe) let s = session
         Task { @MainActor in
-            self.start(session: s)
+            if self.arSession === s {
+                NSLog("[FaceTracking] Restarting on same session (still active)")
+                self.start(session: s)
+            } else {
+                NSLog("[FaceTracking] Ignoring interruption end — session replaced")
+            }
         }
     }
 }
