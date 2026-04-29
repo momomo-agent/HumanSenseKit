@@ -121,8 +121,7 @@ public class GazeSpeakerAttributor: ObservableObject {
 
     // MARK: - Init
 
-    public override init() {
-        super.init()
+    public init() {
         do {
             self.embeddingExtractor = try SimpleSpeakerEmbeddingExtractor()
         } catch {
