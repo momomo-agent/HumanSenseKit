@@ -317,8 +317,12 @@ extension FaceTrackingManager: ARSessionDelegate {
 
     nonisolated public func sessionInterruptionEnded(_ session: ARSession) {
         NSLog("[FaceTracking] ARSession interruption ended, restarting on same session")
+        // ARSession is not Sendable — use nonisolated(unsafe) capture to
+        // cross isolation boundary. Safe because ARKit guarantees this
+        // callback fires on the delegate queue and we only read `session`.
+        nonisolated(unsafe) let s = session
         Task { @MainActor in
-            self.start(session: session)
+            self.start(session: s)
         }
     }
 }
