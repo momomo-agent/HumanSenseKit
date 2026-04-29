@@ -559,7 +559,7 @@ public class GazeSpeakerAttributor: ObservableObject {
 
         let isHighJW: [Bool] = tokens.map { $0.jawDelta > 0.05 || $0.jawVelocity > 0.3 }
 
-        // Calculate votes
+        // Calculate votes — v16: use per-token gaze/yaw/pitch for gates
         var votes = [Float](repeating: 0, count: N)
         for i in 0..<N {
             votes[i] = calculateUserScore(
@@ -575,9 +575,9 @@ public class GazeSpeakerAttributor: ObservableObject {
                 finalScore: finalScoreArr[i],
                 isHighJW: isHighJW[i],
                 zoneScoreMean: scoreMean10[i],
-                gazeOnScreen: gazeOnScreen10[i],
-                headYawAbs: headYawAbs10[i],
-                headPitchAbs: headPitchAbs10[i],
+                gazeOnScreen: tokens[i].gazeOnScreen,     // per-token (was zone)
+                headYawAbs: abs(tokens[i].headYaw),       // per-token (was zone)
+                headPitchAbs: abs(tokens[i].headPitch),   // per-token (was zone)
                 faceDistance: faceDistance10[i]
             )
         }
@@ -599,6 +599,47 @@ public class GazeSpeakerAttributor: ObservableObject {
                 faceDistance: tokens[i].faceDistance
             )
         }
+
+        // v16: Cluster smoothing — group adjacent tokens within 1.5s,
+        // borderline tokens inherit cluster-average vote
+        let clusterGap: Double = 1.5
+        let clusterMargin: Float = 5.0
+        var clusters: [[Int]] = []
+        var currentCluster: [Int] = [0]
+        for i in 1..<N {
+            let gap = result[i].audioTime - result[i-1].audioTime
+            if gap <= clusterGap {
+                currentCluster.append(i)
+            } else {
+                clusters.append(currentCluster)
+                currentCluster = [i]
+            }
+        }
+        clusters.append(currentCluster)
+
+        for cluster in clusters {
+            let avgVotes = cluster.map { votes[$0] }.reduce(0, +) / Float(cluster.count)
+            let clusterIsUser = avgVotes >= speakerThreshold
+            for i in cluster {
+                if abs(votes[i] - speakerThreshold) < clusterMargin {
+                    if result[i].isUserSpeaker != clusterIsUser {
+                        result[i] = SpeakerToken(
+                            text: result[i].text,
+                            isUserSpeaker: clusterIsUser,
+                            score: result[i].score,
+                            audioTime: result[i].audioTime,
+                            jawDelta: result[i].jawDelta,
+                            jawVelocity: result[i].jawVelocity,
+                            gazeOnScreen: result[i].gazeOnScreen,
+                            headYaw: result[i].headYaw,
+                            headPitch: result[i].headPitch,
+                            faceDistance: result[i].faceDistance
+                        )
+                    }
+                }
+            }
+        }
+
         return result
     }
 
@@ -651,6 +692,9 @@ public class GazeSpeakerAttributor: ObservableObject {
         if jeMean10 < 1.5 { votes -= 1.0 }
         if finalScore >= 0.7 { votes -= 3.5 }
         if zoneScoreMean >= 0.7 { votes -= 1.5 }
+
+        // v16: Direct speaker embedding penalty
+        if score >= 0.55 { votes -= 3.0 }
 
         return votes
     }
