@@ -66,6 +66,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         public var headYaw: Float = 0
         public var headPitch: Float = 0
         public var faceDistance: Float = 0
+        public var audioLevel: Float = -60.0  // dB RMS at token time
 
         public init(from speakerToken: SpeakerToken) {
             self.text = speakerToken.text
@@ -849,9 +850,44 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         return token.jawDelta >= 0.2 && token.text.count <= 15
     }
 
+    // MARK: - Confidence Score
+
+    /// Compute a [0, 1] confidence that the sentence is user speech.
+    /// Useful for the app to decide response urgency:
+    /// - > 0.8: immediate response
+    /// - 0.5-0.8: respond but wait for final confirmation
+    /// - < 0.5: likely not user speech
+    func sentenceConfidence(_ tokens: [TokenSegment]) -> Float {
+        guard !tokens.isEmpty else { return 0 }
+        let n = Float(tokens.count)
+
+        let jawMean = tokens.reduce(Float(0)) { $0 + $1.jawDelta } / n
+        let jawVMean = tokens.reduce(Float(0)) { $0 + min($1.jawVelocity, Self.jawVelocityCap) } / n
+        let gazeMean = tokens.reduce(Float(0)) { $0 + $1.gazeOnScreen } / n
+        let yawMean = tokens.reduce(Float(0)) { $0 + abs($1.headYaw) } / n
+        let scoreMean = tokens.reduce(Float(0)) { $0 + $1.score } / n
+        let jawVariance = tokens.reduce(Float(0)) { $0 + ($1.jawDelta - jawMean) * ($1.jawDelta - jawMean) } / n
+        let jawStd = sqrtf(jawVariance)
+
+        var conf: Float = 0
+        conf += min(jawMean / 0.4, 1.0) * 0.30       // jaw contribution
+        conf += min(gazeMean / 0.5, 1.0) * 0.25       // gaze contribution
+        conf += max(0, 1 - yawMean / 0.5) * 0.15      // yaw contribution (lower = better)
+        conf += min(jawVMean / 3.0, 1.0) * 0.15       // jawV contribution
+        conf += max(0, 1 - jawStd / 0.15) * 0.10      // stability contribution
+        conf += min(scoreMean / 0.8, 1.0) * 0.05      // speaker score contribution
+        return min(conf, 1.0)
+    }
+
     // MARK: - Logging
 
     private func logTokenRecognition(token: TokenSegment, isFinal: Bool) {
+        // Query lip-audio correlation for this token's time window
+        let correlator = engine.lipAudioCorrelator
+        let now = ProcessInfo.processInfo.systemUptime
+        // Use a small window around current time (token doesn't have exact uptime)
+        let lipAudioCorr = correlator.correlation  // current instantaneous correlation
+
         let logEntry: [String: Any] = [
             "timestamp": Date().timeIntervalSince1970,
             "sentenceId": sentenceCounter,
@@ -867,6 +903,8 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             "headYaw": token.headYaw,
             "headPitch": token.headPitch,
             "faceDistance": token.faceDistance,
+            "audioLevel": debugInfo.audioLevel,
+            "lipAudioCorr": lipAudioCorr,
         ]
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: logEntry),
