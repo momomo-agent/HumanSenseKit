@@ -126,6 +126,7 @@ public class GazeSpeakerAttributor: ObservableObject {
             self.embeddingExtractor = try SimpleSpeakerEmbeddingExtractor()
         } catch {
             NSLog("[GazeSpeakerAttributor] Failed to load embedding extractor: %@", error.localizedDescription)
+            DiarizationDebugLog.write("INIT extractor FAILED: \(error.localizedDescription)")
         }
         loadSavedEmbedding()
     }

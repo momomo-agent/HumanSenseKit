@@ -16,7 +16,11 @@ let package = Package(
     targets: [
         .target(
             name: "HumanSenseKit",
-            path: "Sources/HumanSenseKit"
+            path: "Sources/HumanSenseKit",
+            resources: [
+                .copy("Resources/FBank.mlmodelc"),
+                .copy("Resources/Embedding.mlmodelc")
+            ]
         ),
     ]
 )

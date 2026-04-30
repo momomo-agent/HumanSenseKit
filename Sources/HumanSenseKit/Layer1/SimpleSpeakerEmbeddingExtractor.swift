@@ -13,17 +13,17 @@ public class SimpleSpeakerEmbeddingExtractor {
     private let weightFrameCount = 589
 
     public init() throws {
-        guard let fbankURL = Bundle.main.url(
-            forResource: "FBank",
-            withExtension: "mlmodelc"
-        ) else {
+        // Models are bundled inside HumanSenseKit (Bundle.module) since v4.9.83.
+        // Fall back to Bundle.main for legacy hosts that still ship them in the app bundle.
+        let fbankURL = Bundle.module.url(forResource: "FBank", withExtension: "mlmodelc")
+            ?? Bundle.main.url(forResource: "FBank", withExtension: "mlmodelc")
+        guard let fbankURL else {
             throw ExtractorError.modelNotFound("FBank.mlmodelc")
         }
 
-        guard let embeddingURL = Bundle.main.url(
-            forResource: "Embedding",
-            withExtension: "mlmodelc"
-        ) else {
+        let embeddingURL = Bundle.module.url(forResource: "Embedding", withExtension: "mlmodelc")
+            ?? Bundle.main.url(forResource: "Embedding", withExtension: "mlmodelc")
+        guard let embeddingURL else {
             throw ExtractorError.modelNotFound("Embedding.mlmodelc")
         }
 
