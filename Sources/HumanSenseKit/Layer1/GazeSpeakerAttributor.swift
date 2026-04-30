@@ -373,7 +373,16 @@ public class GazeSpeakerAttributor: ObservableObject {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
         let relevant = jawHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
-        guard !relevant.isEmpty else { return 0 }
+        // Fallback: sensor data may lag streaming STT tokens by ~100-300ms.
+        // Use the most recent 0.5s of sensor data to estimate activity.
+        guard !relevant.isEmpty else {
+            let fallback = jawHistory.filter {
+                $0.timestamp >= (jawHistory.last?.timestamp ?? 0) - 0.5
+            }
+            guard fallback.count >= 2 else { return 0 }
+            let vals = fallback.map { $0.jawOpen }
+            return abs((vals.max() ?? 0) - (vals.min() ?? 0))
+        }
         let vals = relevant.map { $0.jawOpen }
         return abs((vals.max() ?? 0) - (vals.min() ?? 0))
     }
@@ -381,7 +390,13 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func calculateJawVelocity(startTime: Double, endTime: Double) -> Float {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
-        let relevant = jawHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        var relevant = jawHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        // Fallback: use most recent 0.5s if window has no data
+        if relevant.count < 2 {
+            relevant = jawHistory.filter {
+                $0.timestamp >= (jawHistory.last?.timestamp ?? 0) - 0.5
+            }
+        }
         guard relevant.count >= 2 else { return 0 }
         var maxVel: Float = 0
         for i in 1..<relevant.count {
@@ -396,7 +411,12 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func calculateGazeOnScreenRatio(startTime: Double, endTime: Double) -> Float {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
-        let relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        var relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        if relevant.isEmpty {
+            relevant = gazeHistory.filter {
+                $0.timestamp >= (gazeHistory.last?.timestamp ?? 0) - 0.5
+            }
+        }
         guard !relevant.isEmpty else { return 0 }
         return Float(relevant.filter { $0.onScreen }.count) / Float(relevant.count)
     }
@@ -404,7 +424,12 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func calculateMeanHeadYaw(startTime: Double, endTime: Double) -> Float {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
-        let relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        var relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        if relevant.isEmpty {
+            relevant = gazeHistory.filter {
+                $0.timestamp >= (gazeHistory.last?.timestamp ?? 0) - 0.5
+            }
+        }
         guard !relevant.isEmpty else { return 0 }
         return relevant.map { $0.yaw }.reduce(0, +) / Float(relevant.count)
     }
@@ -412,7 +437,12 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func calculateMeanHeadPitch(startTime: Double, endTime: Double) -> Float {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
-        let relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        var relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        if relevant.isEmpty {
+            relevant = gazeHistory.filter {
+                $0.timestamp >= (gazeHistory.last?.timestamp ?? 0) - 0.5
+            }
+        }
         guard !relevant.isEmpty else { return 0 }
         return relevant.map { $0.pitch }.reduce(0, +) / Float(relevant.count)
     }
@@ -420,7 +450,12 @@ public class GazeSpeakerAttributor: ObservableObject {
     private func calculateMeanFaceDistance(startTime: Double, endTime: Double) -> Float {
         let s = max(0, startTime - jawMargin)
         let e = endTime + jawMargin
-        let relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        var relevant = gazeHistory.filter { $0.timestamp >= s && $0.timestamp <= e }
+        if relevant.isEmpty {
+            relevant = gazeHistory.filter {
+                $0.timestamp >= (gazeHistory.last?.timestamp ?? 0) - 0.5
+            }
+        }
         guard !relevant.isEmpty else { return 0 }
         return relevant.map { $0.distance }.reduce(0, +) / Float(relevant.count)
     }
