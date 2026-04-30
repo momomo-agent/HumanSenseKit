@@ -9,7 +9,7 @@ import Combine
 /// that need speaker attribution.
 @MainActor
 @Observable
-public class GazeSpeakerEngine {
+public class GazeSpeakerEngine: SpeakerAttributionBackend {
     public enum Phase {
         case calibration
         case live
@@ -99,6 +99,59 @@ public class GazeSpeakerEngine {
     public var debugInfo = DebugInfo()
     public var calibrationProgress: Float = 0.0
     public var isCalibrating = false
+
+    // MARK: - SpeakerAttributionBackend conformance
+
+    /// Unified phase exposed to consumers via the protocol.
+    public var speakerPhase: SpeakerEnginePhase {
+        if isCalibrating {
+            let sentences = calibrationSentences
+            let idx = currentCalibrationSentence
+            let sentence = idx < sentences.count ? sentences[idx] : nil
+            return .calibrating(progress: calibrationProgress, currentSentence: sentence,
+                                sentenceIndex: idx, totalSentences: sentences.count)
+        }
+        switch phase {
+        case .calibration: return .unconfigured
+        case .live: return .ready
+        }
+    }
+
+    /// Attributed segments for protocol consumers.
+    public var attributedSegments: [SpeakerAttributedSegment] {
+        transcriptSegments.map { seg in
+            SpeakerAttributedSegment(
+                tokens: seg.tokens.map { Self.toAttributedToken($0) },
+                isFinal: seg.isFinal,
+                timestamp: seg.timestamp
+            )
+        }
+    }
+
+    /// Attributed current tokens for protocol consumers.
+    public var attributedCurrentTokens: [SpeakerAttributedToken] {
+        currentTokens.map { Self.toAttributedToken($0) }
+    }
+
+    /// Debug info for protocol consumers.
+    public var speakerDebugInfo: SpeakerDebugInfo {
+        SpeakerDebugInfo(
+            userEmbeddingStatus: debugInfo.userEmbeddingStatus,
+            embeddingCount: attributor?.embeddingCount ?? 0,
+            ttsWindowActive: ttsWindowActive,
+            lastUserSimilarity: debugInfo.speakerDistance,
+            lastJawDelta: debugInfo.currentJawDelta
+        )
+    }
+
+    private let _eventSubject = PassthroughSubject<SpeakerEvent, Never>()
+    public var events: AnyPublisher<SpeakerEvent, Never> { _eventSubject.eraseToAnyPublisher() }
+
+    // TTS window state
+    private var ttsWindowActive: Bool = false
+    private var ttsWindowEndedAt: Date? = nil
+    private let ttsTailGraceSeconds: TimeInterval = 0.2
+    private var ttsExpectedText: String? = nil
 
     // MARK: - Delegated thresholds (proxy to attributor)
 
@@ -215,6 +268,7 @@ public class GazeSpeakerEngine {
                 } else {
                     self.debugInfo.userEmbeddingStatus = "未标定"
                 }
+                self._eventSubject.send(.phaseChanged(self.speakerPhase))
             }
             .store(in: &attributorCancellables)
 
@@ -258,21 +312,89 @@ public class GazeSpeakerEngine {
                 let speakerTokens = attributor.processTokens(tokens, isFinal: isFinal)
                 let newTokens = speakerTokens.map { TokenSegment(from: $0) }
 
+                // Build source-resolved attributed tokens (TTS window logic
+                // applied here; legacy TokenSegment.isUserSpeaker stays untouched
+                // so old UI code + transcriptSegments grouping keeps working).
+                let attributedTokens = newTokens.map { legacy in
+                    Self.toAttributedToken(legacy, source: self.resolveSource(for: legacy))
+                }
+
                 if isFinal {
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
-                    // Notify callback with user speech
-                    let userText = newTokens.filter { $0.isUserSpeaker }.map { $0.text }.joined()
+                    let segment = SpeakerAttributedSegment(
+                        tokens: attributedTokens, isFinal: true, timestamp: Date()
+                    )
+                    self._eventSubject.send(.finalSegment(segment))
+
+                    // userSpeech event fires only for tokens actually resolved
+                    // as .user (TTS window may have demoted them to .tts).
+                    let userText = attributedTokens
+                        .filter { $0.source == .user }
+                        .map(\.text).joined()
                     if !userText.isEmpty {
                         self.onUserSpeech?(userText)
+                        self._eventSubject.send(.userSpeech(text: userText, segment: segment))
                     }
                 } else {
                     self.buildStreamingTokens(newTokens)
+                    self._eventSubject.send(.streamingTokens(attributedTokens))
                 }
             }
         }
         engine.sttManager.onTokens = onTokens
+    }
+
+    /// Three-source classification for an incoming token.
+    ///
+    /// Outside TTS window: user vs ambient (follows attributor's isUserSpeaker).
+    /// Inside TTS window: demote to .tts unless the attributor's combined score
+    /// is *well above* threshold (strong barge-in) OR text overlaps the TTS
+    /// output. AEC residue + speaker-embedding mismatch will naturally sit
+    /// near the threshold boundary, so a margin of 1.3x keeps it out of .user.
+    private func resolveSource(for token: TokenSegment) -> SpeakerSource {
+        let now = Date()
+        let inWindow = ttsWindowActive ||
+            (ttsWindowEndedAt.map { now.timeIntervalSince($0) < ttsTailGraceSeconds } ?? false)
+
+        guard inWindow else {
+            return token.isUserSpeaker ? .user : .ambient
+        }
+
+        // TTS window active — tighten the user-acceptance criterion.
+        let baseThreshold = attributor?.speakerThreshold ?? 4.75
+        let strongCutoff = baseThreshold * 1.3   // score must be well above normal pass
+        if token.isUserSpeaker && token.score > strongCutoff {
+            return .user   // strong barge-in
+        }
+
+        // If expectedText overlaps the transcribed token text, it's almost
+        // certainly AI echo, regardless of what the attributor thinks.
+        if let expected = ttsExpectedText, !expected.isEmpty,
+           Self.tokenEchoesExpected(token.text, expected: expected) {
+            return .tts
+        }
+
+        // Default during TTS window: attributor said user but not strongly
+        // enough — treat as AEC leak (.tts). Non-user stays ambient; this is
+        // rare because AEC + silence usually keep ambient tokens from reaching
+        // here, but if a second real person talks during TTS we still label
+        // them .ambient (not .tts) so downstream can decide.
+        if token.isUserSpeaker {
+            return .tts   // weak user match during TTS ≈ echo
+        }
+        return .ambient
+    }
+
+    /// Very cheap substring check: does the transcribed token appear inside
+    /// the expected TTS text? Case-insensitive, trims whitespace. Short tokens
+    /// (< 2 chars) skip this heuristic to avoid false positives on common
+    /// Chinese syllables like "的" / "了".
+    private static func tokenEchoesExpected(_ tokenText: String, expected: String) -> Bool {
+        let t = tokenText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 2 else { return false }
+        return expected.localizedCaseInsensitiveContains(t)
     }
 
     private func buildFinalSegments(_ newTokens: [TokenSegment]) {
@@ -442,6 +564,59 @@ public class GazeSpeakerEngine {
         transcriptSegments = []
         currentTokens = []
         attributor?.reset()
+    }
+
+    // MARK: - SpeakerAttributionBackend Protocol
+
+    /// Provide `phase` conformance by mapping to `SpeakerEnginePhase`.
+    /// Note: protocol requires `var phase: SpeakerEnginePhase` but we already have
+    /// `var phase: Phase`. We satisfy the protocol via explicit witness methods below.
+
+    public func cancelCalibration() {
+        attributor?.stopAdditionalCalibration()
+        isCalibrating = false
+        _eventSubject.send(.phaseChanged(speakerPhase))
+    }
+
+    public func resetCalibration() {
+        deleteEmbedding()
+        _eventSubject.send(.phaseChanged(speakerPhase))
+    }
+
+    public func markTTSStart(expectedText: String?) {
+        ttsWindowActive = true
+        ttsExpectedText = expectedText
+        ttsWindowEndedAt = nil
+    }
+
+    public func markTTSEnd() {
+        ttsWindowActive = false
+        ttsWindowEndedAt = Date()
+    }
+
+    /// Convert a legacy TokenSegment to SpeakerAttributedToken with an
+    /// explicit source (three-way: .user / .ambient / .tts) resolved by
+    /// `resolveSource`. Keep this overload so callers that don't care about
+    /// TTS window (e.g. `attributedSegments` getter for display) still work.
+    private static func toAttributedToken(_ token: TokenSegment,
+                                          source: SpeakerSource? = nil) -> SpeakerAttributedToken {
+        let resolved = source ?? (token.isUserSpeaker ? .user : .ambient)
+        let metadata = SpeakerTokenMetadata(
+            jawDelta: token.jawDelta,
+            jawVelocity: token.jawVelocity,
+            gazeOnScreen: token.gazeOnScreen,
+            headYaw: token.headYaw,
+            headPitch: token.headPitch,
+            faceDistance: token.faceDistance
+        )
+        return SpeakerAttributedToken(
+            text: token.text,
+            audioTime: token.audioTime,
+            endTime: token.audioTime,
+            source: resolved,
+            score: token.score,
+            metadata: metadata
+        )
     }
 
     // MARK: - Logging

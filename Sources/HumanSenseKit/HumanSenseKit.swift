@@ -9,15 +9,20 @@ public class HumanSenseKit {
     public let state: HumanSenseState
     public let observer: HumanSenseObserver
     public let sttManager: STTManager
-    
+
     /// The underlying engine. Exposed for GazeSpeakerEngine and advanced consumers.
     public let engine: HumanStateEngine
-    
-    public init(enableHandGestures: Bool = false, enableSTT: Bool = true) {
+
+    /// Unified speaker attribution backend. Default: GazeSpeakerEngine.
+    public let speaker: SpeakerAttributionBackend
+
+    public init(enableHandGestures: Bool = false, enableSTT: Bool = true,
+                speakerBackend: SpeakerAttributionBackend? = nil) {
         self.engine = HumanStateEngine()
         self.sttManager = engine.sttManager
         self.state = HumanSenseState(engine: engine)
         self.observer = HumanSenseObserver(state: state)
+        self.speaker = speakerBackend ?? GazeSpeakerEngine(engine: engine)
     }
     
     /// Real-time ARFrame callback — bypasses SwiftUI for 60fps consumers (e.g. AvatarKit).
