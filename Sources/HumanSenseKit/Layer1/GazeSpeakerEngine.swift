@@ -723,22 +723,69 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         )
     }
 
-    // MARK: - Sentence-Level Classification (v4 decision tree)
+    // MARK: - Adaptive Sentence Classification (v7)
 
-    /// Classify an entire sentence as user/non-user using a decision tree.
+    /// Two-layer adaptive classifier:
+    /// 1. Scene detection: conversation (other people) vs media (video/audio background)
+    ///    - Uses running jaw p25 from recent tokens
+    ///    - p25 < 0.05 → media scene (background jaw is very low)
+    /// 2a. Conversation scene: sentence-level decision tree (v4)
+    /// 2b. Media scene: token-level jaw spike detection
     ///
-    /// Three-level cascade:
-    /// 1. Reject gate: jaw < 0.21 → not user (below speaking baseline)
-    /// 2. Strong accept: jaw >= 0.35 AND jawV >= 2.0 → user (clear speech)
-    /// 3. Medium path: jaw*jawV >= 0.2 → check support signals (gaze, score, dist, yaw)
-    ///
-    /// Autoresearch result (3 test files, 69 sentence-phase pairs):
-    /// - Per-phase: Acc=89.9%, Prec=80.0%, Rec=90.9%, F1=85.1%
-    /// - Sentence-level (stream AND final): Acc=91.4%, Prec=90.0%, Rec=81.8%, F1=85.7%
+    /// Autoresearch result (4 test files, 78 sentence-phase pairs):
+    /// - Acc=88.5%, Prec=81.8%, Rec=90.0%, F1=85.7%
     private static let jawVelocityCap: Float = 5.0
+    private static let mediaSceneP25Threshold: Float = 0.05
+
+    /// Running jaw values for scene detection (last ~200 tokens)
+    private var recentJawValues: [Float] = []
+    private static let jawHistorySize = 200
+
+    private var isMediaScene: Bool {
+        guard recentJawValues.count >= 20 else { return false }
+        let sorted = recentJawValues.sorted()
+        let p25 = sorted[sorted.count / 4]
+        return p25 < Self.mediaSceneP25Threshold
+    }
+
+    private func updateJawHistory(_ tokens: [TokenSegment]) {
+        for t in tokens {
+            recentJawValues.append(t.jawDelta)
+        }
+        if recentJawValues.count > Self.jawHistorySize {
+            recentJawValues.removeFirst(recentJawValues.count - Self.jawHistorySize)
+        }
+    }
 
     func classifySentenceAsUser(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
         guard !tokens.isEmpty else { return false }
+
+        // Update jaw history for scene detection
+        updateJawHistory(tokens)
+
+        if isMediaScene {
+            return classifyMediaScene(tokens)
+        } else {
+            return classifyConversationScene(tokens, isFinal: isFinal)
+        }
+    }
+
+    /// Media scene: detect jaw spikes above background baseline.
+    /// User tokens have jaw >= 0.2 while background is < 0.1.
+    private func classifyMediaScene(_ tokens: [TokenSegment]) -> Bool {
+        let n = Float(tokens.count)
+        let activeToks = tokens.filter { $0.jawDelta >= 0.2 }
+        let activeRatio = Float(activeToks.count) / n
+        guard activeRatio >= 0.08, !activeToks.isEmpty else { return false }
+
+        let activeJawV = activeToks.reduce(Float(0)) {
+            $0 + min($1.jawVelocity, Self.jawVelocityCap)
+        } / Float(activeToks.count)
+        return activeJawV >= 1.0
+    }
+
+    /// Conversation scene: sentence-level decision tree.
+    private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
         let n = Float(tokens.count)
 
         let jawMean = tokens.reduce(Float(0)) { $0 + $1.jawDelta } / n
@@ -754,7 +801,6 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
         // Level 2: Strong accept — clear speech activity
         if jawMean >= 0.35 && jawVMean >= 2.0 {
-            // Reject if head is turned far away
             if yawMean > 0.55 { return false }
             return true
         }
