@@ -723,17 +723,16 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         )
     }
 
-    // MARK: - Adaptive Sentence Classification (v7)
+    // MARK: - Adaptive Sentence Classification (v10d)
 
-    /// Two-layer adaptive classifier:
-    /// 1. Scene detection: conversation (other people) vs media (video/audio background)
-    ///    - Uses running jaw p25 from recent tokens
-    ///    - p25 < 0.05 → media scene (background jaw is very low)
-    /// 2a. Conversation scene: sentence-level decision tree (v4)
-    /// 2b. Media scene: token-level jaw spike detection
+    /// Two-layer adaptive classifier with jaw variance and gaze refinements:
+    /// 1. Scene detection: conversation vs media (jaw p25 < 0.05)
+    /// 2a. Conversation: decision tree + jaw_std penalty + gaze gate on strong accept
+    /// 2b. Media: token-level jaw spike detection
     ///
-    /// Autoresearch result (4 test files, 78 sentence-phase pairs):
-    /// - Acc=88.5%, Prec=81.8%, Rec=90.0%, F1=85.7%
+    /// Autoresearch result (4 test files, 40 sentences):
+    /// - Sentence-level (stream-only): Acc=92.5%, Prec=83.3%, Rec=100%, F1=90.9%
+    /// - Per-phase: Acc=91.0%, Prec=87.1%, Rec=90.0%, F1=88.5%
     private static let jawVelocityCap: Float = 5.0
     private static let mediaSceneP25Threshold: Float = 0.05
 
@@ -784,7 +783,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         return activeJawV >= 1.0
     }
 
-    /// Conversation scene: sentence-level decision tree.
+    /// Conversation scene: decision tree with jaw variance and gaze refinements.
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
         let n = Float(tokens.count)
 
@@ -796,12 +795,19 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let distMean = tokens.reduce(Float(0)) { $0 + $1.faceDistance } / n
         let jawJawV = jawMean * jawVMean
 
+        // Jaw variance: high std means fluctuating jaw (likely background noise)
+        let jawVariance = tokens.reduce(Float(0)) { $0 + ($1.jawDelta - jawMean) * ($1.jawDelta - jawMean) } / n
+        let jawStd = sqrtf(jawVariance)
+        let highVariance = jawStd > 0.1
+
         // Level 1: Reject gate — jaw below speaking baseline
         if jawMean < 0.21 { return false }
 
-        // Level 2: Strong accept — clear speech activity
+        // Level 2: Strong accept — clear speech with consistent jaw and gaze
         if jawMean >= 0.35 && jawVMean >= 2.0 {
             if yawMean > 0.55 { return false }
+            if highVariance { return false }  // Fluctuating jaw = background noise
+            if gazeMean < 0.3 { return false } // Low gaze = probably not looking at screen
             return true
         }
 
@@ -815,7 +821,8 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             if distMean < 0.52  { support += 1 }
             if yawMean < 0.4    { support += 1 }
 
-            let threshold = isFinal ? 1 : 2
+            var threshold = isFinal ? 1 : 2
+            if highVariance { threshold += 1 } // Require more support if jaw is noisy
             return support >= threshold
         }
 
