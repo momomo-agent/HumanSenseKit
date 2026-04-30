@@ -103,6 +103,12 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     private var pauseTimer: Timer?
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
     private static let pauseThreshold: TimeInterval = 1.5
+
+    /// Minimum speakingToAIScore to emit `.userSpeech`.
+    /// Below this, the utterance is treated as not addressed to the screen.
+    /// SentenceBuilder uses exponential-decay weighted gaze — 0.3 means
+    /// roughly "looked at screen for at least the first few characters".
+    private static let speakingToAIThreshold: Float = 0.3
     /// Dedup: track last emitted userSpeech text to avoid double-firing
     /// when pause commit fires and then isFinal arrives with same text.
     private var lastEmittedUserSpeechText: String = ""
@@ -353,10 +359,20 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                         NSLog("[GazeSpeakerEngine] fragment drop (final): userRatio=%.2f userText='%@' totalText='%@'",
                               userRatio, userText, totalText)
                     }
-                    if !userText.isEmpty && !fragmentDrop && userText != self.lastEmittedUserSpeechText {
+                    // SpeakingToAI gate: check if the user was actually
+                    // addressing the screen. Uses SentenceBuilder's
+                    // speakingToAIScore (exponential-decay weighted gaze).
+                    let speakingToAI = self.engine.sttManager.segments.last?.speakingToAIScore ?? 0
+                    let gazeGate = speakingToAI >= Self.speakingToAIThreshold
+
+                    if !userText.isEmpty && !fragmentDrop && gazeGate && userText != self.lastEmittedUserSpeechText {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
+                    }
+                    if !gazeGate && !userText.isEmpty {
+                        NSLog("[GazeSpeakerEngine] gaze gate (final): speakingToAI=%.2f < %.2f, text='%@'",
+                              speakingToAI, Self.speakingToAIThreshold, userText)
                     }
                     // Reset dedup after final — next utterance is a new turn.
                     self.lastEmittedUserSpeechText = ""
@@ -426,6 +442,14 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         if !totalText.isEmpty && userRatio < 0.5 {
             NSLog("[GazeSpeakerEngine] fragment drop (pause): userRatio=%.2f userText='%@' totalText='%@'",
                   userRatio, userText, totalText)
+            return
+        }
+
+        // SpeakingToAI gate (same as isFinal path).
+        let speakingToAI = engine.sttManager.segments.last?.speakingToAIScore ?? 0
+        guard speakingToAI >= Self.speakingToAIThreshold else {
+            NSLog("[GazeSpeakerEngine] gaze gate (pause): speakingToAI=%.2f < %.2f, text='%@'",
+                  speakingToAI, Self.speakingToAIThreshold, userText)
             return
         }
 
