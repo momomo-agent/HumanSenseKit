@@ -102,7 +102,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     // stop arriving for >1s (Apple's isFinal can lag 2-3s on Chinese).
     private var pauseTimer: Timer?
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
-    private static let pauseThreshold: TimeInterval = 1.5
+    private static let pauseThreshold: TimeInterval = 2.0
 
     /// Set to false to disable pause-commit (only isFinal triggers userSpeech).
     public var pauseCommitEnabled: Bool = true
