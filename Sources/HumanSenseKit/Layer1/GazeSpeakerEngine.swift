@@ -103,6 +103,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     private var pauseTimer: Timer?
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
     private static let pauseThreshold: TimeInterval = 1.5
+
+    /// Set to false to disable pause-commit (only isFinal triggers userSpeech).
+    public var pauseCommitEnabled: Bool = true
     /// Dedup: track last emitted userSpeech text to avoid double-firing
     /// when pause commit fires and then isFinal arrives with same text.
     private var lastEmittedUserSpeechText: String = ""
@@ -385,9 +388,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     }
 
                     // Pause detection: track user tokens and reset timer.
-                    // If no new tokens arrive for 1s, fire .userSpeech early.
+                    // If no new tokens arrive for pauseThreshold, fire .userSpeech early.
                     let userTokens = accumulatedAttributed.filter { $0.source == .user }
-                    if !userTokens.isEmpty {
+                    if !userTokens.isEmpty && self.pauseCommitEnabled {
                         self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()
                         self.pauseTimer = Timer.scheduledTimer(
