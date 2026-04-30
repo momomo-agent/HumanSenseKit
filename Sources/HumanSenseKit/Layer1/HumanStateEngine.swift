@@ -52,7 +52,13 @@ public class HumanStateEngine {
     /// audio signals stay correctly time-aligned with the wall clock
     /// even when face tracking briefly drops out.
     private var sampleClockTimer: Timer?
-    private let sampleClockHz: Double = 60.0
+    /// 30Hz matches ARFrame cadence on iPhone Face Tracking and is
+    /// plenty for token attribution — token audio ranges are 100-300ms
+    /// long, so 33ms sample resolution gives 3-9 samples per token,
+    /// which is what the matched.filter needs for stable RMS / jaw
+    /// statistics. Higher rates just add MainActor hops without
+    /// improving attribution accuracy.
+    private let sampleClockHz: Double = 30.0
 
     // 应用生命周期监听
     private var isStarted = false
