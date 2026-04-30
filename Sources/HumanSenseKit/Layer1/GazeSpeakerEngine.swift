@@ -342,10 +342,22 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
                     // userSpeech event fires only for tokens actually resolved
                     // as .user (TTS window may have demoted them to .tts).
+                    // Fragmented-sentence guard: if attributor judged too many
+                    // tokens as non-user, emitting the .user subset produces a
+                    // mangled string ("哈喽。你好啊" → "好"). Drop the whole
+                    // utterance instead of sending garbage downstream.
                     let userText = attributedTokens
                         .filter { $0.source == .user }
                         .map(\.text).joined()
-                    if !userText.isEmpty && userText != self.lastEmittedUserSpeechText {
+                    let totalText = attributedTokens.map(\.text).joined()
+                    let userRatio: Double = totalText.isEmpty ? 0 :
+                        Double(userText.count) / Double(totalText.count)
+                    let fragmentDrop = !totalText.isEmpty && userRatio < 0.7
+                    if fragmentDrop {
+                        NSLog("[GazeSpeakerEngine] fragment drop (final): userRatio=%.2f userText='%@' totalText='%@'",
+                              userRatio, userText, totalText)
+                    }
+                    if !userText.isEmpty && !fragmentDrop && userText != self.lastEmittedUserSpeechText {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
@@ -398,6 +410,18 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             .filter { $0.source == .user }
             .map(\.text).joined()
         guard !userText.isEmpty else { return }
+
+        // Fragment-drop guard: same logic as final handler. If attributor
+        // labeled most of the accumulated tokens non-user, the .user subset
+        // is a mangled fragment — don't ship it.
+        let totalText = tokens.map(\.text).joined()
+        let userRatio: Double = totalText.isEmpty ? 0 :
+            Double(userText.count) / Double(totalText.count)
+        if !totalText.isEmpty && userRatio < 0.7 {
+            NSLog("[GazeSpeakerEngine] fragment drop (pause): userRatio=%.2f userText='%@' totalText='%@'",
+                  userRatio, userText, totalText)
+            return
+        }
 
         lastEmittedUserSpeechText = userText
         let segment = SpeakerAttributedSegment(
