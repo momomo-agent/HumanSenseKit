@@ -579,14 +579,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // replaces the previous tokens entirely — corrections to earlier
         // words arrive as updated tokens with the same or shifted audioTime.
         //
-        // Previous code tried to preserve a "prefix" of old tokens when
-        // newFirst.audioTime > oldFirst.audioTime, but this caused:
-        // - Duplicate tokens when STT corrected earlier text
-        // - Stale tokens mixing with fresh ones
-        // - Ordering inconsistencies in the debug UI
-        //
-        // Simple replacement is correct for this STT mode.
-        currentTokens = newTokens
+        // Only store user tokens — aligns with demo's
+        // `currentTokens.filter { $0.isUserSpeaker }` and means consumers
+        // reading currentTokens directly get pre-filtered results.
+        currentTokens = newTokens.filter { $0.isUserSpeaker }
     }
 
     // MARK: - Audio Processing
