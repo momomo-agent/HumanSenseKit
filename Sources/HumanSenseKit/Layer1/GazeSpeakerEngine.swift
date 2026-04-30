@@ -102,10 +102,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     // stop arriving for >1s (Apple's isFinal can lag 2-3s on Chinese).
     private var pauseTimer: Timer?
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
-    private static let pauseThreshold: TimeInterval = 2.0
-
-    /// Set to false to disable pause-commit (only isFinal triggers userSpeech).
-    public var pauseCommitEnabled: Bool = true
+    /// Pause-commit threshold in seconds. When no new user tokens arrive
+    /// for this duration, `.userSpeech` fires early (before isFinal).
+    /// Set to 0 to disable pause-commit (only isFinal triggers userSpeech).
+    public var pauseCommitThreshold: TimeInterval = 2.0
     /// Dedup: track last emitted userSpeech text to avoid double-firing
     /// when pause commit fires and then isFinal arrives with same text.
     private var lastEmittedUserSpeechText: String = ""
@@ -390,11 +390,11 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     // Pause detection: track user tokens and reset timer.
                     // If no new tokens arrive for pauseThreshold, fire .userSpeech early.
                     let userTokens = accumulatedAttributed.filter { $0.source == .user }
-                    if !userTokens.isEmpty && self.pauseCommitEnabled {
+                    if !userTokens.isEmpty && self.pauseCommitThreshold > 0 {
                         self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()
                         self.pauseTimer = Timer.scheduledTimer(
-                            withTimeInterval: Self.pauseThreshold, repeats: false
+                            withTimeInterval: self.pauseCommitThreshold, repeats: false
                         ) { [weak self] _ in
                             Task { @MainActor [weak self] in
                                 self?.firePauseCommit()
