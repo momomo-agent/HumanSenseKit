@@ -354,13 +354,20 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.lastEmittedUserSpeechText = ""
                 } else {
                     self.buildStreamingTokens(newTokens)
-                    self._eventSubject.send(.streamingTokens(attributedTokens))
+                    // Emit the *accumulated* currentTokens (with prefix preserved
+                    // across Apple STT corrections), not just this batch.
+                    // This matches demo behavior and prevents text flicker when
+                    // STT corrects earlier tokens.
+                    let accumulatedAttributed = self.currentTokens.map { legacy in
+                        Self.toAttributedToken(legacy, source: self.resolveSource(for: legacy))
+                    }
+                    self._eventSubject.send(.streamingTokens(accumulatedAttributed))
 
                     // Pause detection: track user tokens and reset timer.
                     // If no new tokens arrive for 1s, fire .userSpeech early.
-                    let userTokens = attributedTokens.filter { $0.source == .user }
+                    let userTokens = accumulatedAttributed.filter { $0.source == .user }
                     if !userTokens.isEmpty {
-                        self.lastStreamingAttributedTokens = attributedTokens
+                        self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()
                         self.pauseTimer = Timer.scheduledTimer(
                             withTimeInterval: Self.pauseThreshold, repeats: false
