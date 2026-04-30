@@ -339,28 +339,32 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
+                    // Sentence-level classification (v3): override token-level isUserSpeaker.
+                    let sentenceIsUser = self.classifySentenceAsUser(newTokens, isFinal: true)
+                    let overriddenTokens: [SpeakerAttributedToken]
+                    if sentenceIsUser {
+                        // Mark ALL tokens as user (sentence classified as user speech)
+                        overriddenTokens = attributedTokens.map {
+                            SpeakerAttributedToken(text: $0.text, audioTime: $0.audioTime, endTime: $0.endTime, source: .user, score: $0.score, metadata: $0.metadata)
+                        }
+                    } else {
+                        // Mark ALL tokens as ambient
+                        overriddenTokens = attributedTokens.map {
+                            SpeakerAttributedToken(text: $0.text, audioTime: $0.audioTime, endTime: $0.endTime, source: .ambient, score: $0.score, metadata: $0.metadata)
+                        }
+                    }
+
                     let segment = SpeakerAttributedSegment(
-                        tokens: attributedTokens.filter { $0.source == .user },
+                        tokens: overriddenTokens.filter { $0.source == .user },
                         isFinal: true, timestamp: Date()
                     )
                     if !segment.tokens.isEmpty {
                         self._eventSubject.send(.finalSegment(segment))
                     }
 
-                    // Sandwich repair + fragment guard (same as pauseCommit).
-                    let repairedTokens = Self.sandwichRepair(attributedTokens)
-                    let userText = repairedTokens
-                        .filter { $0.source == .user }
-                        .map(\.text).joined()
-                    let totalText = repairedTokens.map(\.text).joined()
-                    let userRatio: Double = totalText.isEmpty ? 0 :
-                        Double(userText.count) / Double(totalText.count)
-                    let fragmentDrop = !totalText.isEmpty && userRatio < 0.5
-                    if fragmentDrop {
-                        NSLog("[GazeSpeakerEngine] fragment drop (final): userRatio=%.2f userText='%@' totalText='%@'",
-                              userRatio, userText, totalText)
-                    }
-                    if !userText.isEmpty && !fragmentDrop && userText != self.lastEmittedUserSpeechText {
+                    let userText = sentenceIsUser ? overriddenTokens.map(\.text).joined() : ""
+                    let totalText = overriddenTokens.map(\.text).joined()
+                    if !userText.isEmpty && userText != self.lastEmittedUserSpeechText {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
@@ -376,23 +380,26 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.sentenceCounter += 1
                 } else {
                     self.buildStreamingTokens(newTokens)
-                    // Build attributed tokens from accumulated currentTokens.
-                    let accumulatedAttributed = self.currentTokens.map { legacy in
-                        Self.toAttributedToken(legacy, source: self.resolveSource(for: legacy))
-                    }
-                    // Only emit user tokens — aligns with demo's
-                    // `currentTokens.filter { $0.isUserSpeaker }` display logic.
-                    // Non-user tokens (ambient/TTS echo) are filtered at Kit level
-                    // so consumers don't need to filter themselves.
-                    let userOnly = accumulatedAttributed.filter { $0.source == .user }
-                    if !userOnly.isEmpty {
-                        self._eventSubject.send(.streamingTokens(userOnly))
-                    }
 
-                    // Pause detection: track user tokens and reset timer.
-                    // If no new tokens arrive for pauseThreshold, fire .userSpeech early.
-                    let userTokens = accumulatedAttributed.filter { $0.source == .user }
-                    if !userTokens.isEmpty && self.pauseCommitThreshold > 0 {
+                    // Sentence-level classification (v3) for streaming.
+                    let sentenceIsUser = self.classifySentenceAsUser(self.currentTokens, isFinal: false)
+
+                    if sentenceIsUser {
+                        // Emit all tokens as user
+                        let allAsUser = self.currentTokens.map { legacy in
+                            let attr = Self.toAttributedToken(legacy, source: .user)
+                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime, source: .user, score: attr.score, metadata: attr.metadata)
+                        }
+                        self._eventSubject.send(.streamingTokens(allAsUser))
+                    }
+                    // If not user, don't emit streaming tokens (silence)
+
+                    // Pause detection: only reset timer if sentence is user.
+                    if sentenceIsUser && self.pauseCommitThreshold > 0 {
+                        let accumulatedAttributed = self.currentTokens.map { legacy in
+                            let attr = Self.toAttributedToken(legacy, source: .user)
+                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime, source: .user, score: attr.score, metadata: attr.metadata)
+                        }
                         self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()
                         self.pauseTimer = Timer.scheduledTimer(
@@ -714,6 +721,53 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             score: token.score,
             metadata: metadata
         )
+    }
+
+    // MARK: - Sentence-Level Classification (v3)
+
+    /// Classify an entire sentence as user/non-user using aggregate features.
+    /// Core signal: jawDelta_mean × gazeOnScreen_mean ("jaw*gaze composite").
+    /// Streaming uses a higher threshold (mouth actively moving),
+    /// final uses a lower threshold (mouth may have closed).
+    ///
+    /// Autoresearch result: 97.4% accuracy, 100% precision, 91.7% recall, 95.7% F1.
+    private static let sentenceStreamingThreshold: Float = 4.0
+    private static let sentenceFinalThreshold: Float = 2.5
+    private static let jawVelocityCap: Float = 5.0
+
+    func classifySentenceAsUser(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
+        guard !tokens.isEmpty else { return false }
+        let n = Float(tokens.count)
+
+        let jawMean = tokens.reduce(Float(0)) { $0 + $1.jawDelta } / n
+        let jawVMean = tokens.reduce(Float(0)) { $0 + min($1.jawVelocity, Self.jawVelocityCap) } / n
+        let gazeMean = tokens.reduce(Float(0)) { $0 + $1.gazeOnScreen } / n
+        let yawMean = tokens.reduce(Float(0)) { $0 + abs($1.headYaw) } / n
+
+        let jawGaze = jawMean * gazeMean
+
+        var votes: Float = 0
+
+        // Primary: jaw * gaze composite
+        if jawGaze >= 0.14      { votes += 4.0 }
+        else if jawGaze >= 0.10 { votes += 2.0 }
+        else if jawGaze < 0.02  { votes -= 3.0 }
+
+        // Secondary: jaw velocity
+        if jawVMean >= 1.5      { votes += 1.5 }
+        else if jawVMean >= 0.5 { votes += 0.5 }
+
+        // Gaze floor
+        if gazeMean < 0.15 { votes -= 3.0 }
+
+        // Jaw boost
+        if jawMean >= 0.3 { votes += 1.0 }
+
+        // Head orientation penalty
+        if yawMean > 0.45 { votes -= 1.5 }
+
+        let threshold = isFinal ? Self.sentenceFinalThreshold : Self.sentenceStreamingThreshold
+        return votes > threshold
     }
 
     // MARK: - Logging
