@@ -339,31 +339,25 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
-                    // Sentence-level classification (v3): override token-level isUserSpeaker.
-                    let sentenceIsUser = self.classifySentenceAsUser(newTokens, isFinal: true)
-                    let overriddenTokens: [SpeakerAttributedToken]
-                    if sentenceIsUser {
-                        // Mark ALL tokens as user (sentence classified as user speech)
-                        overriddenTokens = attributedTokens.map {
-                            SpeakerAttributedToken(text: $0.text, audioTime: $0.audioTime, endTime: $0.endTime, source: .user, score: $0.score, metadata: $0.metadata)
-                        }
-                    } else {
-                        // Mark ALL tokens as ambient
-                        overriddenTokens = attributedTokens.map {
-                            SpeakerAttributedToken(text: $0.text, audioTime: $0.audioTime, endTime: $0.endTime, source: .ambient, score: $0.score, metadata: $0.metadata)
-                        }
+                    // Two-layer classification (v10d):
+                    // 1. Token-level: each token gets user/ambient independently
+                    // 2. Sentence-level: overall sentence classification
+                    let classifiedTokens = self.classifyTokens(newTokens, isFinal: true)
+                    let overriddenTokens = zip(attributedTokens, classifiedTokens).map { (attr, isUser) in
+                        SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
+                                               source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
                     }
 
                     let segment = SpeakerAttributedSegment(
-                        tokens: overriddenTokens.filter { $0.source == .user },
+                        tokens: overriddenTokens,
                         isFinal: true, timestamp: Date()
                     )
-                    if !segment.tokens.isEmpty {
+                    let userTokens = overriddenTokens.filter { $0.source == .user }
+                    if !userTokens.isEmpty {
                         self._eventSubject.send(.finalSegment(segment))
                     }
 
-                    let userText = sentenceIsUser ? overriddenTokens.map(\.text).joined() : ""
-                    let totalText = overriddenTokens.map(\.text).joined()
+                    let userText = userTokens.map(\.text).joined()
                     if !userText.isEmpty && userText != self.lastEmittedUserSpeechText {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
@@ -381,24 +375,27 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                 } else {
                     self.buildStreamingTokens(newTokens)
 
-                    // Sentence-level classification (v3) for streaming.
-                    let sentenceIsUser = self.classifySentenceAsUser(self.currentTokens, isFinal: false)
+                    // Two-layer classification (v10d) for streaming.
+                    let classifiedTokens = self.classifyTokens(self.currentTokens, isFinal: false)
+                    let hasUserTokens = classifiedTokens.contains(true)
 
-                    if sentenceIsUser {
-                        // Emit all tokens as user
-                        let allAsUser = self.currentTokens.map { legacy in
-                            let attr = Self.toAttributedToken(legacy, source: .user)
-                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime, source: .user, score: attr.score, metadata: attr.metadata)
+                    if hasUserTokens {
+                        // Emit tokens with per-token classification
+                        let classified = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
+                            let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
+                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
+                                                          source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
                         }
-                        self._eventSubject.send(.streamingTokens(allAsUser))
+                        self._eventSubject.send(.streamingTokens(classified))
                     }
-                    // If not user, don't emit streaming tokens (silence)
+                    // If no user tokens, don't emit streaming tokens (silence)
 
-                    // Pause detection: only reset timer if sentence is user.
-                    if sentenceIsUser && self.pauseCommitThreshold > 0 {
-                        let accumulatedAttributed = self.currentTokens.map { legacy in
-                            let attr = Self.toAttributedToken(legacy, source: .user)
-                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime, source: .user, score: attr.score, metadata: attr.metadata)
+                    // Pause detection: only reset timer if sentence has user tokens.
+                    if hasUserTokens && self.pauseCommitThreshold > 0 {
+                        let accumulatedAttributed = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
+                            let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
+                            return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
+                                                          source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
                         }
                         self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()
@@ -757,31 +754,11 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     func classifySentenceAsUser(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
-        guard !tokens.isEmpty else { return false }
-
-        // Update jaw history for scene detection
-        updateJawHistory(tokens)
-
-        if isMediaScene {
-            return classifyMediaScene(tokens)
-        } else {
-            return classifyConversationScene(tokens, isFinal: isFinal)
-        }
+        let tokenResults = classifyTokens(tokens, isFinal: isFinal)
+        return tokenResults.contains(true)
     }
 
-    /// Media scene: detect jaw spikes above background baseline.
-    /// User tokens have jaw >= 0.2 while background is < 0.1.
-    private func classifyMediaScene(_ tokens: [TokenSegment]) -> Bool {
-        let n = Float(tokens.count)
-        let activeToks = tokens.filter { $0.jawDelta >= 0.2 }
-        let activeRatio = Float(activeToks.count) / n
-        guard activeRatio >= 0.08, !activeToks.isEmpty else { return false }
-
-        let activeJawV = activeToks.reduce(Float(0)) {
-            $0 + min($1.jawVelocity, Self.jawVelocityCap)
-        } / Float(activeToks.count)
-        return activeJawV >= 1.0
-    }
+    /// Media scene: kept for reference. Logic moved to classifyTokens + classifyTokenInMediaScene.
 
     /// Conversation scene: decision tree with jaw variance and gaze refinements.
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
@@ -827,6 +804,49 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         }
 
         return false
+    }
+
+    // MARK: - Two-Layer Classification
+
+    /// Classify each token as user/non-user, then apply sentence-level logic.
+    /// Returns an array of Bool (one per token) indicating user speech.
+    ///
+    /// - Media scene: token-level jaw spike detection (each token independent)
+    /// - Conversation scene: sentence-level decision tree (all tokens same label)
+    func classifyTokens(_ tokens: [TokenSegment], isFinal: Bool) -> [Bool] {
+        guard !tokens.isEmpty else { return [] }
+
+        // Update jaw history for scene detection
+        updateJawHistory(tokens)
+
+        if isMediaScene {
+            // Token-level: classify each token independently by jaw spike
+            let tokenResults = tokens.map { classifyTokenInMediaScene($0) }
+
+            // Sentence-level gate: require minimum active ratio
+            let activeCount = tokenResults.filter { $0 }.count
+            let activeRatio = Float(activeCount) / Float(tokens.count)
+            let activeToks = tokens.enumerated().filter { tokenResults[$0.offset] }
+            let activeJawV: Float = activeToks.isEmpty ? 0 :
+                activeToks.reduce(Float(0)) { $0 + min($1.element.jawVelocity, Self.jawVelocityCap) } / Float(activeToks.count)
+
+            // If too few active tokens or low jawV, reject entire sentence
+            if activeRatio < 0.08 || activeJawV < 1.0 {
+                return Array(repeating: false, count: tokens.count)
+            }
+            return tokenResults
+        } else {
+            // Conversation scene: sentence-level classification
+            // All tokens get the same label
+            let sentenceIsUser = classifyConversationScene(tokens, isFinal: isFinal)
+            return Array(repeating: sentenceIsUser, count: tokens.count)
+        }
+    }
+
+    /// Token-level classification for media scene.
+    /// User tokens have jaw >= 0.2 (background video/audio has jaw < 0.1).
+    private func classifyTokenInMediaScene(_ token: TokenSegment) -> Bool {
+        return token.jawDelta >= 0.2
     }
 
     // MARK: - Logging
