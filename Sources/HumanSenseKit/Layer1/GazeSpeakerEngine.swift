@@ -723,16 +723,18 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         )
     }
 
-    // MARK: - Sentence-Level Classification (v3)
+    // MARK: - Sentence-Level Classification (v4 decision tree)
 
-    /// Classify an entire sentence as user/non-user using aggregate features.
-    /// Core signal: jawDelta_mean × gazeOnScreen_mean ("jaw*gaze composite").
-    /// Streaming uses a higher threshold (mouth actively moving),
-    /// final uses a lower threshold (mouth may have closed).
+    /// Classify an entire sentence as user/non-user using a decision tree.
     ///
-    /// Autoresearch result: 97.4% accuracy, 100% precision, 91.7% recall, 95.7% F1.
-    private static let sentenceStreamingThreshold: Float = 4.0
-    private static let sentenceFinalThreshold: Float = 2.5
+    /// Three-level cascade:
+    /// 1. Reject gate: jaw < 0.21 → not user (below speaking baseline)
+    /// 2. Strong accept: jaw >= 0.35 AND jawV >= 2.0 → user (clear speech)
+    /// 3. Medium path: jaw*jawV >= 0.2 → check support signals (gaze, score, dist, yaw)
+    ///
+    /// Autoresearch result (3 test files, 69 sentence-phase pairs):
+    /// - Per-phase: Acc=89.9%, Prec=80.0%, Rec=90.9%, F1=85.1%
+    /// - Sentence-level (stream AND final): Acc=91.4%, Prec=90.0%, Rec=81.8%, F1=85.7%
     private static let jawVelocityCap: Float = 5.0
 
     func classifySentenceAsUser(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
@@ -743,31 +745,35 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let jawVMean = tokens.reduce(Float(0)) { $0 + min($1.jawVelocity, Self.jawVelocityCap) } / n
         let gazeMean = tokens.reduce(Float(0)) { $0 + $1.gazeOnScreen } / n
         let yawMean = tokens.reduce(Float(0)) { $0 + abs($1.headYaw) } / n
+        let scoreMean = tokens.reduce(Float(0)) { $0 + $1.score } / n
+        let distMean = tokens.reduce(Float(0)) { $0 + $1.faceDistance } / n
+        let jawJawV = jawMean * jawVMean
 
-        let jawGaze = jawMean * gazeMean
+        // Level 1: Reject gate — jaw below speaking baseline
+        if jawMean < 0.21 { return false }
 
-        var votes: Float = 0
+        // Level 2: Strong accept — clear speech activity
+        if jawMean >= 0.35 && jawVMean >= 2.0 {
+            // Reject if head is turned far away
+            if yawMean > 0.55 { return false }
+            return true
+        }
 
-        // Primary: jaw * gaze composite
-        if jawGaze >= 0.14      { votes += 4.0 }
-        else if jawGaze >= 0.10 { votes += 2.0 }
-        else if jawGaze < 0.02  { votes -= 3.0 }
+        // Level 3: Medium activity — need supporting signals
+        if jawJawV >= 0.2 {
+            if yawMean > 0.55 { return false }
 
-        // Secondary: jaw velocity
-        if jawVMean >= 1.5      { votes += 1.5 }
-        else if jawVMean >= 0.5 { votes += 0.5 }
+            var support = 0
+            if gazeMean >= 0.15 { support += 1 }
+            if scoreMean >= 0.7 { support += 1 }
+            if distMean < 0.52  { support += 1 }
+            if yawMean < 0.4    { support += 1 }
 
-        // Gaze floor
-        if gazeMean < 0.15 { votes -= 3.0 }
+            let threshold = isFinal ? 1 : 2
+            return support >= threshold
+        }
 
-        // Jaw boost
-        if jawMean >= 0.3 { votes += 1.0 }
-
-        // Head orientation penalty
-        if yawMean > 0.45 { votes -= 1.5 }
-
-        let threshold = isFinal ? Self.sentenceFinalThreshold : Self.sentenceStreamingThreshold
-        return votes > threshold
+        return false
     }
 
     // MARK: - Logging
