@@ -37,6 +37,23 @@ public class HumanStateEngine {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
+    /// Independent sample-clock timer that pushes a frame to the
+    /// UserSentenceReconstructor every ~16ms regardless of whether
+    /// `faceManager.$faceState` ticks. ARSession can stall (interrupted,
+    /// silent recovery, OS reclaim) and stop publishing new face states for
+    /// hundreds of ms to several seconds; without this clock, the
+    /// reconstructor's sample buffer would freeze at the last face tick
+    /// and any token whose audioTimeRange falls in the gap would either
+    /// miss every sample or fall back to a stale one (jaw=0/vol=0 from
+    /// the last "mouth closed" frame), even though the audio buffer is
+    /// still live and the user is actively speaking. The clock takes
+    /// `humanState.face` (most recent face state) and `humanState.audio`
+    /// (live RMS volume from AudioDetectionManager) every frame, so
+    /// audio signals stay correctly time-aligned with the wall clock
+    /// even when face tracking briefly drops out.
+    private var sampleClockTimer: Timer?
+    private let sampleClockHz: Double = 60.0
+
     // 应用生命周期监听
     private var isStarted = false
     private var providedSession: ARSession?
@@ -142,14 +159,61 @@ public class HumanStateEngine {
                 self?.sttManager.start()
             }
             .store(in: &cancellables)
+
+        startSampleClock()
     }
 
     public func stop() {
         isStarted = false
+        stopSampleClock()
         faceManager.stop()
         audioManager.stop()
         deviceMotionManager.stop()
         sttManager.stop()
+    }
+
+    // MARK: - Sample Clock
+
+    /// Push reconstructor samples on a fixed cadence so the buffer never
+    /// freezes when faceManager.$faceState stalls (ARSession interrupted,
+    /// camera contention, OS suspend recovery). See sampleClockTimer doc.
+    private func startSampleClock() {
+        stopSampleClock()
+        let interval = 1.0 / sampleClockHz
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // We hop to MainActor because Timer fires on its scheduling
+            // run loop — here we know that's main, but be explicit so the
+            // Sendable-checked code stays clean.
+            Task { @MainActor in
+                self.tickSampleClock()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sampleClockTimer = timer
+    }
+
+    private func stopSampleClock() {
+        sampleClockTimer?.invalidate()
+        sampleClockTimer = nil
+    }
+
+    private func tickSampleClock() {
+        // Always pull the latest snapshot — humanState.face will hold the
+        // last good face tick (jaw / gaze / head forward), humanState.audio
+        // is updated every audio buffer (~50Hz) by AudioDetectionManager
+        // through the combineLatest binding. If face tracking has been
+        // stalled, the face fields here are simply the last good ones,
+        // which is exactly what we want for short interruptions.
+        let face = humanState.face
+        let audio = humanState.audio
+        sttManager.userSentenceReconstructor.recordSample(
+            ts: Date().timeIntervalSince1970,
+            jaw: face.jawOpen,
+            vol: audio.volume,
+            gaze: face.isLookingAtScreen,
+            headFwd: face.headOrientation.isFacingForward
+        )
     }
 
     // MARK: - Lifecycle Observers
@@ -220,15 +284,12 @@ public class HumanStateEngine {
         humanState.face = face
         humanState.audio = audio
 
-        // Feed the user-sentence reconstructor per frame. Matches the live
-        // view of signals used for token attribution.
-        sttManager.userSentenceReconstructor.recordSample(
-            ts: Date().timeIntervalSince1970,
-            jaw: face.jawOpen,
-            vol: audio.volume,
-            gaze: face.isLookingAtScreen,
-            headFwd: face.headOrientation.isFacingForward
-        )
+        // Sample push moved to startSampleClock() so the reconstructor
+        // keeps getting frames at 60Hz even when faceManager stalls
+        // (ARSession interrupted / camera contention / OS suspend
+        // recovery). The combineLatest sink still fires whenever face or
+        // audio publishes, but it only updates humanState mirrors and
+        // activity inference — not the sample buffer.
 
         let newActivity = inferActivity(face: face, audio: audio)
 
