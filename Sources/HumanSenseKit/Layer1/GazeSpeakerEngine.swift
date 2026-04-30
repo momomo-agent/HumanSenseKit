@@ -102,7 +102,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     // stop arriving for >1s (Apple's isFinal can lag 2-3s on Chinese).
     private var pauseTimer: Timer?
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
-    private static let pauseThreshold: TimeInterval = 1.0
+    private static let pauseThreshold: TimeInterval = 1.5
     /// Dedup: track last emitted userSpeech text to avoid double-firing
     /// when pause commit fires and then isFinal arrives with same text.
     private var lastEmittedUserSpeechText: String = ""
@@ -340,19 +340,15 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     )
                     self._eventSubject.send(.finalSegment(segment))
 
-                    // userSpeech event fires only for tokens actually resolved
-                    // as .user (TTS window may have demoted them to .tts).
-                    // Fragmented-sentence guard: if attributor judged too many
-                    // tokens as non-user, emitting the .user subset produces a
-                    // mangled string ("哈喽。你好啊" → "好"). Drop the whole
-                    // utterance instead of sending garbage downstream.
-                    let userText = attributedTokens
+                    // Sandwich repair + fragment guard (same as pauseCommit).
+                    let repairedTokens = Self.sandwichRepair(attributedTokens)
+                    let userText = repairedTokens
                         .filter { $0.source == .user }
                         .map(\.text).joined()
-                    let totalText = attributedTokens.map(\.text).joined()
+                    let totalText = repairedTokens.map(\.text).joined()
                     let userRatio: Double = totalText.isEmpty ? 0 :
                         Double(userText.count) / Double(totalText.count)
-                    let fragmentDrop = !totalText.isEmpty && userRatio < 0.7
+                    let fragmentDrop = !totalText.isEmpty && userRatio < 0.5
                     if fragmentDrop {
                         NSLog("[GazeSpeakerEngine] fragment drop (final): userRatio=%.2f userText='%@' totalText='%@'",
                               userRatio, userText, totalText)
@@ -406,18 +402,22 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         lastStreamingAttributedTokens = []
         guard !tokens.isEmpty else { return }
 
-        let userText = tokens
+        // Sandwich repair: if a non-user token sits between two user tokens
+        // in a continuous utterance, it's almost certainly the same speaker.
+        // Promote isolated non-user tokens to .user when surrounded by .user.
+        let repaired = Self.sandwichRepair(tokens)
+
+        let userText = repaired
             .filter { $0.source == .user }
             .map(\.text).joined()
         guard !userText.isEmpty else { return }
 
-        // Fragment-drop guard: same logic as final handler. If attributor
-        // labeled most of the accumulated tokens non-user, the .user subset
-        // is a mangled fragment — don't ship it.
-        let totalText = tokens.map(\.text).joined()
+        // Fragment-drop guard: if user tokens are still < 50% after repair,
+        // the whole segment is likely ambient/tts — drop it.
+        let totalText = repaired.map(\.text).joined()
         let userRatio: Double = totalText.isEmpty ? 0 :
             Double(userText.count) / Double(totalText.count)
-        if !totalText.isEmpty && userRatio < 0.7 {
+        if !totalText.isEmpty && userRatio < 0.5 {
             NSLog("[GazeSpeakerEngine] fragment drop (pause): userRatio=%.2f userText='%@' totalText='%@'",
                   userRatio, userText, totalText)
             return
@@ -425,7 +425,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
         lastEmittedUserSpeechText = userText
         let segment = SpeakerAttributedSegment(
-            tokens: tokens, isFinal: false, timestamp: Date()
+            tokens: repaired, isFinal: false, timestamp: Date()
         )
         onUserSpeech?(userText)
         _eventSubject.send(.userSpeech(text: userText, segment: segment))
@@ -470,6 +470,41 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             return .tts   // weak user match during TTS ≈ echo
         }
         return .ambient
+    }
+
+    /// Sandwich repair: promote isolated non-user tokens to .user when they
+    /// sit between two .user tokens in a continuous utterance. Handles the
+    /// common case where attributor misjudges a single syllable mid-sentence
+    /// (e.g. "怎么样啊？" → all ✗ except nothing, but surrounded by user tokens).
+    ///
+    /// Also handles the "majority user" case: if ≥50% of tokens are already
+    /// .user, promote ALL non-user tokens (the speaker didn't change mid-sentence).
+    private static func sandwichRepair(_ tokens: [SpeakerAttributedToken]) -> [SpeakerAttributedToken] {
+        guard tokens.count >= 2 else { return tokens }
+        let userCount = tokens.filter { $0.source == .user }.count
+        // Majority rule: if ≥50% are user, promote everything
+        if userCount * 2 >= tokens.count {
+            return tokens.map { t in
+                t.source == .user ? t : SpeakerAttributedToken(
+                    id: t.id, text: t.text, audioTime: t.audioTime,
+                    endTime: t.endTime, source: .user, score: t.score,
+                    metadata: t.metadata)
+            }
+        }
+        // Sandwich: promote non-user tokens between two user tokens
+        var result = tokens
+        for i in 1..<(tokens.count - 1) {
+            if tokens[i].source != .user,
+               tokens[i-1].source == .user,
+               tokens[i+1].source == .user {
+                result[i] = SpeakerAttributedToken(
+                    id: tokens[i].id, text: tokens[i].text,
+                    audioTime: tokens[i].audioTime, endTime: tokens[i].endTime,
+                    source: .user, score: tokens[i].score,
+                    metadata: tokens[i].metadata)
+            }
+        }
+        return result
     }
 
     /// Very cheap substring check: does the transcribed token appear inside
