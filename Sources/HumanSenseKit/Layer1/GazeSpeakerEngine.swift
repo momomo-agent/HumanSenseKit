@@ -561,6 +561,11 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // attributor have the full picture. User-only filtering happens
         // at event emission (.streamingTokens, .finalSegment, .userSpeech).
         currentTokens = newTokens
+        #if DEBUG
+        for token in newTokens {
+            logTokenRecognition(token: token, isFinal: false)
+        }
+        #endif
     }
 
     // MARK: - Audio Processing
