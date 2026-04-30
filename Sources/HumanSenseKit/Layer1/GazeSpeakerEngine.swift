@@ -342,9 +342,12 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.currentTokens = []
 
                     let segment = SpeakerAttributedSegment(
-                        tokens: attributedTokens, isFinal: true, timestamp: Date()
+                        tokens: attributedTokens.filter { $0.source == .user },
+                        isFinal: true, timestamp: Date()
                     )
-                    self._eventSubject.send(.finalSegment(segment))
+                    if !segment.tokens.isEmpty {
+                        self._eventSubject.send(.finalSegment(segment))
+                    }
 
                     // Sandwich repair + fragment guard (same as pauseCommit).
                     let repairedTokens = Self.sandwichRepair(attributedTokens)
@@ -384,14 +387,18 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.engine.sttManager.rotateTask()
                 } else {
                     self.buildStreamingTokens(newTokens)
-                    // Emit the *accumulated* currentTokens (with prefix preserved
-                    // across Apple STT corrections), not just this batch.
-                    // This matches demo behavior and prevents text flicker when
-                    // STT corrects earlier tokens.
+                    // Build attributed tokens from accumulated currentTokens.
                     let accumulatedAttributed = self.currentTokens.map { legacy in
                         Self.toAttributedToken(legacy, source: self.resolveSource(for: legacy))
                     }
-                    self._eventSubject.send(.streamingTokens(accumulatedAttributed))
+                    // Only emit user tokens — aligns with demo's
+                    // `currentTokens.filter { $0.isUserSpeaker }` display logic.
+                    // Non-user tokens (ambient/TTS echo) are filtered at Kit level
+                    // so consumers don't need to filter themselves.
+                    let userOnly = accumulatedAttributed.filter { $0.source == .user }
+                    if !userOnly.isEmpty {
+                        self._eventSubject.send(.streamingTokens(userOnly))
+                    }
 
                     // Pause detection: track user tokens and reset timer.
                     // If no new tokens arrive for 1s, fire .userSpeech early.
@@ -549,17 +556,17 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
     private func buildFinalSegments(_ newTokens: [TokenSegment]) {
         // isFinal tokens represent the complete, corrected utterance.
-        // Simply append as a single final segment — no merging with
-        // previous segments (which may be from a different utterance
-        // or a pauseCommit partial).
-        guard !newTokens.isEmpty else { return }
+        // Only store user tokens — aligns with demo's
+        // `transcriptSegments.filter { $0.isUserSpeaker }` display.
+        let userTokens = newTokens.filter { $0.isUserSpeaker }
+        guard !userTokens.isEmpty else { return }
 
-        for token in newTokens {
+        for token in userTokens {
             logTokenRecognition(token: token, isFinal: true)
         }
 
         transcriptSegments.append(TranscriptSegment(
-            tokens: newTokens, isFinal: true, timestamp: Date()
+            tokens: userTokens, isFinal: true, timestamp: Date()
         ))
         if transcriptSegments.count > 20 {
             transcriptSegments.removeFirst(transcriptSegments.count - 20)
