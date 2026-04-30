@@ -535,17 +535,16 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
     private func buildFinalSegments(_ newTokens: [TokenSegment]) {
         // isFinal tokens represent the complete, corrected utterance.
-        // Only store user tokens — aligns with demo's
-        // `transcriptSegments.filter { $0.isUserSpeaker }` display.
-        let userTokens = newTokens.filter { $0.isUserSpeaker }
-        guard !userTokens.isEmpty else { return }
+        // Store ALL tokens so debug UI has the full picture.
+        // User-only filtering happens at event emission.
+        guard !newTokens.isEmpty else { return }
 
-        for token in userTokens {
+        for token in newTokens {
             logTokenRecognition(token: token, isFinal: true)
         }
 
         transcriptSegments.append(TranscriptSegment(
-            tokens: userTokens, isFinal: true, timestamp: Date()
+            tokens: newTokens, isFinal: true, timestamp: Date()
         ))
         if transcriptSegments.count > 20 {
             transcriptSegments.removeFirst(transcriptSegments.count - 20)
@@ -558,10 +557,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // replaces the previous tokens entirely — corrections to earlier
         // words arrive as updated tokens with the same or shifted audioTime.
         //
-        // Only store user tokens — aligns with demo's
-        // `currentTokens.filter { $0.isUserSpeaker }` and means consumers
-        // reading currentTokens directly get pre-filtered results.
-        currentTokens = newTokens.filter { $0.isUserSpeaker }
+        // Store ALL tokens here (including non-user) so debug UI and
+        // attributor have the full picture. User-only filtering happens
+        // at event emission (.streamingTokens, .finalSegment, .userSpeech).
+        currentTokens = newTokens
     }
 
     // MARK: - Audio Processing
