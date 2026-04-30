@@ -37,28 +37,28 @@ public class HumanStateEngine {
     private var previousJawOpen: Float = 0
     private var lastHistoryAppend = Date.distantPast
 
-    /// Independent sample-clock timer that pushes a frame to the
-    /// UserSentenceReconstructor every ~16ms regardless of whether
-    /// `faceManager.$faceState` ticks. ARSession can stall (interrupted,
-    /// silent recovery, OS reclaim) and stop publishing new face states for
-    /// hundreds of ms to several seconds; without this clock, the
-    /// reconstructor's sample buffer would freeze at the last face tick
-    /// and any token whose audioTimeRange falls in the gap would either
-    /// miss every sample or fall back to a stale one (jaw=0/vol=0 from
-    /// the last "mouth closed" frame), even though the audio buffer is
-    /// still live and the user is actively speaking. The clock takes
-    /// `humanState.face` (most recent face state) and `humanState.audio`
-    /// (live RMS volume from AudioDetectionManager) every frame, so
-    /// audio signals stay correctly time-aligned with the wall clock
-    /// even when face tracking briefly drops out.
+    /// Sample-clock timer that ONLY fires when `faceManager.$faceState`
+    /// has gone silent (ARSession interrupted / camera contention / OS
+    /// suspend recovery). Normal path: combineLatest sink in
+    /// setupBindings() pushes samples at face cadence (~30 Hz). The
+    /// timer ticks at a low 10 Hz and only pushes if the face path
+    /// hasn't pushed in `sampleStallThreshold` seconds.
+    ///
+    /// Why not always-on: SmileOS has many MainActor consumers
+    /// (SwiftUI live transcript views, AvatarKit, AgenticKit). Pushing
+    /// every 16-33ms with full MainActor hops backs up the queue, the
+    /// ARFrame delegate stops getting drained on time, ARKit logs
+    /// "delegate is retaining N ARFrames" and stops delivering new
+    /// frames — face tracking dies. Timer must be a backstop, not the
+    /// primary clock.
     private var sampleClockTimer: Timer?
-    /// 30Hz matches ARFrame cadence on iPhone Face Tracking and is
-    /// plenty for token attribution — token audio ranges are 100-300ms
-    /// long, so 33ms sample resolution gives 3-9 samples per token,
-    /// which is what the matched.filter needs for stable RMS / jaw
-    /// statistics. Higher rates just add MainActor hops without
-    /// improving attribution accuracy.
-    private let sampleClockHz: Double = 30.0
+    private let sampleClockHz: Double = 10.0
+    /// If face path hasn't pushed a sample in this long, the timer fills
+    /// in. 0.1s = 3 missed face frames at 30Hz, well above jitter,
+    /// well below the audio-buffer cadence we care about for token
+    /// attribution.
+    private let sampleStallThreshold: TimeInterval = 0.1
+    private var lastFaceSamplePushTs: TimeInterval = 0
 
     // 应用生命周期监听
     private var isStarted = false
@@ -205,22 +205,20 @@ public class HumanStateEngine {
     }
 
     private func tickSampleClock() {
-        // Pull face from humanState (last good values during ARSession
-        // stalls) but pull audio DIRECTLY from audioManager.audioState,
-        // not from humanState.audio. The latter is mirrored by the
-        // combineLatest sink in setupBindings(), which only fires when
-        // BOTH faceState and audioState publish new values — if face
-        // stalls, humanState.audio.volume freezes too, even though
-        // audioManager keeps receiving live RMS from every audio buffer.
-        // Reading audioManager directly bypasses that gating so the
-        // reconstructor sees real-time volume regardless of face
-        // tracking state.
+        // Backstop only: if the face path is pushing samples on time,
+        // skip. This avoids doubling the sample rate and overloading
+        // MainActor consumers (SwiftUI / Avatar / Agentic).
+        let now = Date().timeIntervalSince1970
+        if now - lastFaceSamplePushTs < sampleStallThreshold { return }
+        // Face path has stalled (>100ms gap). Push a synthetic sample
+        // using the last good face state + live audio volume so the
+        // reconstructor's window doesn't go empty during ARSession
+        // interruptions.
         let face = humanState.face
-        let liveVolume = audioManager.audioState.volume
         sttManager.userSentenceReconstructor.recordSample(
-            ts: Date().timeIntervalSince1970,
+            ts: now,
             jaw: face.jawOpen,
-            vol: liveVolume,
+            vol: audioManager.audioState.volume,
             gaze: face.isLookingAtScreen,
             headFwd: face.headOrientation.isFacingForward
         )
@@ -294,12 +292,18 @@ public class HumanStateEngine {
         humanState.face = face
         humanState.audio = audio
 
-        // Sample push moved to startSampleClock() so the reconstructor
-        // keeps getting frames at 60Hz even when faceManager stalls
-        // (ARSession interrupted / camera contention / OS suspend
-        // recovery). The combineLatest sink still fires whenever face or
-        // audio publishes, but it only updates humanState mirrors and
-        // activity inference — not the sample buffer.
+        // Primary sample push: face cadence (~30Hz) when ARKit is
+        // healthy. The 10Hz backup timer fills in only when this path
+        // stalls (ARSession interrupted / camera contention).
+        let now = Date().timeIntervalSince1970
+        sttManager.userSentenceReconstructor.recordSample(
+            ts: now,
+            jaw: face.jawOpen,
+            vol: audioManager.audioState.volume,
+            gaze: face.isLookingAtScreen,
+            headFwd: face.headOrientation.isFacingForward
+        )
+        lastFaceSamplePushTs = now
 
         let newActivity = inferActivity(face: face, audio: audio)
 
