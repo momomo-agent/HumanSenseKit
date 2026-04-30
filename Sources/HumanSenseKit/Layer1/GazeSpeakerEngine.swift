@@ -518,79 +518,38 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     private func buildFinalSegments(_ newTokens: [TokenSegment]) {
-        var currentGroup: [TokenSegment] = []
-        var currentIsUser: Bool? = nil
-
-        if let lastSegment = transcriptSegments.last {
-            let timeSinceLastSegment = Date().timeIntervalSince(lastSegment.timestamp)
-            if timeSinceLastSegment < 1.0 {
-                transcriptSegments.removeLast()
-                currentGroup = lastSegment.tokens
-                currentIsUser = lastSegment.tokens.last?.isUserSpeaker
-            }
-        }
+        // isFinal tokens represent the complete, corrected utterance.
+        // Simply append as a single final segment — no merging with
+        // previous segments (which may be from a different utterance
+        // or a pauseCommit partial).
+        guard !newTokens.isEmpty else { return }
 
         for token in newTokens {
             logTokenRecognition(token: token, isFinal: true)
-
-            if currentIsUser == nil {
-                currentIsUser = token.isUserSpeaker
-                currentGroup.append(token)
-            } else if currentIsUser == token.isUserSpeaker {
-                currentGroup.append(token)
-            } else {
-                if !currentGroup.isEmpty {
-                    transcriptSegments.append(TranscriptSegment(
-                        tokens: currentGroup, isFinal: true, timestamp: Date()
-                    ))
-                    if transcriptSegments.count > 20 {
-                        transcriptSegments.removeFirst(transcriptSegments.count - 20)
-                    }
-                }
-                currentGroup = [token]
-                currentIsUser = token.isUserSpeaker
-            }
         }
 
-        if !currentGroup.isEmpty {
-            transcriptSegments.append(TranscriptSegment(
-                tokens: currentGroup, isFinal: true, timestamp: Date()
-            ))
-            if transcriptSegments.count > 20 {
-                transcriptSegments.removeFirst(transcriptSegments.count - 20)
-            }
+        transcriptSegments.append(TranscriptSegment(
+            tokens: newTokens, isFinal: true, timestamp: Date()
+        ))
+        if transcriptSegments.count > 20 {
+            transcriptSegments.removeFirst(transcriptSegments.count - 20)
         }
     }
 
     private func buildStreamingTokens(_ newTokens: [TokenSegment]) {
-        var groupedTokens: [TokenSegment] = []
-        var currentGroup: [TokenSegment] = []
-        var currentIsUser: Bool? = nil
-
-        for token in newTokens {
-            if currentIsUser == nil {
-                currentIsUser = token.isUserSpeaker
-                currentGroup.append(token)
-            } else if currentIsUser == token.isUserSpeaker {
-                currentGroup.append(token)
-            } else {
-                groupedTokens.append(contentsOf: currentGroup)
-                currentGroup = [token]
-                currentIsUser = token.isUserSpeaker
-            }
-        }
-        groupedTokens.append(contentsOf: currentGroup)
-
-        // Preserve prefix when iOS STT corrects earlier tokens
-        if !currentTokens.isEmpty,
-           let newFirst = groupedTokens.first,
-           let oldFirst = currentTokens.first,
-           newFirst.audioTime > oldFirst.audioTime {
-            let prefix = currentTokens.filter { $0.audioTime < newFirst.audioTime }
-            currentTokens = prefix + groupedTokens
-        } else {
-            currentTokens = groupedTokens
-        }
+        // Apple STT (timeIndexedProgressiveTranscription) returns the FULL
+        // utterance on every callback, not incremental deltas. Each call
+        // replaces the previous tokens entirely — corrections to earlier
+        // words arrive as updated tokens with the same or shifted audioTime.
+        //
+        // Previous code tried to preserve a "prefix" of old tokens when
+        // newFirst.audioTime > oldFirst.audioTime, but this caused:
+        // - Duplicate tokens when STT corrected earlier text
+        // - Stale tokens mixing with fresh ones
+        // - Ordering inconsistencies in the debug UI
+        //
+        // Simple replacement is correct for this STT mode.
+        currentTokens = newTokens
     }
 
     // MARK: - Audio Processing
