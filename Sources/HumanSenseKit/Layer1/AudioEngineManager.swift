@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import AVFoundation
+import UIKit
 
 /// Layer 0: Pure audio engine lifecycle management.
 /// Handles AVAudioEngine start/stop, audio session configuration,
@@ -37,11 +38,34 @@ public class AudioEngineManager {
     
     func start() {
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
+        )
+        // Detect background→foreground stale audio engine.
+        // When the app is suspended and resumed, AVAudioEngine often stops
+        // silently without firing AVAudioSession.interruptionNotification
+        // (those are reserved for active interruptions like phone calls /
+        // Siri). Without this hook, we'd only notice via the 5s health
+        // timer, leaving audioStreamStartTime stale for up to 5s and
+        // producing sampleCount=0 / jaw=0 rows in the reconstructor.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground(_:)),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        // Detect ARKit / route forced engine config change. The engine is
+        // already stopped by the system when this fires.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleEngineConfigurationChange(_:)),
+            name: .AVAudioEngineConfigurationChange,
+            object: nil  // engine identity may have changed across restarts
         )
         configureAndStart()
     }
@@ -51,6 +75,8 @@ public class AudioEngineManager {
         healthTimer = nil
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: nil)
         
         if !usesExternalEngine {
             audioEngine.stop()
@@ -158,6 +184,50 @@ public class AudioEngineManager {
               let reason = info[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
         let session = AVAudioSession.sharedInstance()
         print("[Audio] Route changed: reason=\(reason), inputs=\(session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" }.joined(separator: ","))")
+    }
+
+    /// App returning to foreground. Check engine health immediately;
+    /// without this we'd only catch a stale engine via the 5s health timer.
+    @objc private func handleWillEnterForeground(_ notification: Notification) {
+        Task { @MainActor in
+            guard self.isRunning else { return }
+            if self.usesExternalEngine {
+                // Host owns the engine; we cannot judge from .isRunning alone
+                // because the host may have already restarted it. Always
+                // notify so the STT layer re-stamps audioStreamStartTime.
+                NSLog("[Audio] willEnterForeground (external engine) — notifying restart")
+                self.onRestart?()
+                return
+            }
+            if !self.audioEngine.isRunning {
+                NSLog("[Audio] willEnterForeground — engine stale, restarting")
+                self.configureAndStart()
+                self.onRestart?()
+            } else {
+                // Engine survived the suspend (background mode active or short suspend).
+                // We still notify so STT can re-stamp its timeline against the new
+                // sample stream, since AVAudioEngine.isRunning==true does not guarantee
+                // the sample timeline survived (especially with VoiceProcessingIO).
+                NSLog("[Audio] willEnterForeground — engine still running, notifying anyway")
+                self.onRestart?()
+            }
+        }
+    }
+
+    /// Configuration change (route change, ARKit reconfigures audio session,
+    /// new sample rate, etc.). The engine is already stopped when this fires.
+    @objc private func handleEngineConfigurationChange(_ notification: Notification) {
+        Task { @MainActor in
+            guard self.isRunning else { return }
+            if self.usesExternalEngine {
+                NSLog("[Audio] EngineConfigurationChange (external engine) — notifying restart")
+                self.onRestart?()
+                return
+            }
+            NSLog("[Audio] EngineConfigurationChange — restarting engine")
+            self.configureAndStart()
+            self.onRestart?()
+        }
     }
 }
 #endif
