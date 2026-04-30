@@ -295,15 +295,15 @@ public class HumanStateEngine {
         // Primary sample push: face cadence (~30Hz) when ARKit is
         // healthy. The 10Hz backup timer fills in only when this path
         // stalls (ARSession interrupted / camera contention).
-        let now = Date().timeIntervalSince1970
+        let sampleTs = Date().timeIntervalSince1970
         sttManager.userSentenceReconstructor.recordSample(
-            ts: now,
+            ts: sampleTs,
             jaw: face.jawOpen,
             vol: audioManager.audioState.volume,
             gaze: face.isLookingAtScreen,
             headFwd: face.headOrientation.isFacingForward
         )
-        lastFaceSamplePushTs = now
+        lastFaceSamplePushTs = sampleTs
 
         let newActivity = inferActivity(face: face, audio: audio)
 
