@@ -97,6 +97,15 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     public var transcriptSegments: [TranscriptSegment] = []
     public var currentTokens: [TokenSegment] = []
     public var debugInfo = DebugInfo()
+
+    // Pause detection: fire .userSpeech early when volatile tokens
+    // stop arriving for >1s (Apple's isFinal can lag 2-3s on Chinese).
+    private var pauseTimer: Timer?
+    private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
+    private static let pauseThreshold: TimeInterval = 1.0
+    /// Dedup: track last emitted userSpeech text to avoid double-firing
+    /// when pause commit fires and then isFinal arrives with same text.
+    private var lastEmittedUserSpeechText: String = ""
     public var calibrationProgress: Float = 0.0
     public var isCalibrating = false
 
@@ -320,6 +329,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                 }
 
                 if isFinal {
+                    self.pauseTimer?.invalidate()
+                    self.pauseTimer = nil
+                    self.lastStreamingAttributedTokens = []
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
@@ -333,17 +345,59 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     let userText = attributedTokens
                         .filter { $0.source == .user }
                         .map(\.text).joined()
-                    if !userText.isEmpty {
+                    if !userText.isEmpty && userText != self.lastEmittedUserSpeechText {
+                        self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
                     }
+                    // Reset dedup after final — next utterance is a new turn.
+                    self.lastEmittedUserSpeechText = ""
                 } else {
                     self.buildStreamingTokens(newTokens)
                     self._eventSubject.send(.streamingTokens(attributedTokens))
+
+                    // Pause detection: track user tokens and reset timer.
+                    // If no new tokens arrive for 1s, fire .userSpeech early.
+                    let userTokens = attributedTokens.filter { $0.source == .user }
+                    if !userTokens.isEmpty {
+                        self.lastStreamingAttributedTokens = attributedTokens
+                        self.pauseTimer?.invalidate()
+                        self.pauseTimer = Timer.scheduledTimer(
+                            withTimeInterval: Self.pauseThreshold, repeats: false
+                        ) { [weak self] _ in
+                            Task { @MainActor [weak self] in
+                                self?.firePauseCommit()
+                            }
+                        }
+                    }
                 }
             }
         }
         engine.sttManager.onTokens = onTokens
+    }
+
+    /// Pause commit: volatile tokens stopped arriving for >1s.
+    /// Emit `.userSpeech` early so the consumer (VM) can start LLM
+    /// without waiting for Apple's isFinal (which can lag 2-3s on Chinese).
+    /// When isFinal eventually arrives, the duplicate is harmless — VM
+    /// will see the same text and can deduplicate or treat as confirmation.
+    private func firePauseCommit() {
+        pauseTimer = nil
+        let tokens = lastStreamingAttributedTokens
+        lastStreamingAttributedTokens = []
+        guard !tokens.isEmpty else { return }
+
+        let userText = tokens
+            .filter { $0.source == .user }
+            .map(\.text).joined()
+        guard !userText.isEmpty else { return }
+
+        lastEmittedUserSpeechText = userText
+        let segment = SpeakerAttributedSegment(
+            tokens: tokens, isFinal: false, timestamp: Date()
+        )
+        onUserSpeech?(userText)
+        _eventSubject.send(.userSpeech(text: userText, segment: segment))
     }
 
     /// Three-source classification for an incoming token.
