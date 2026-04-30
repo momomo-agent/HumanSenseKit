@@ -101,6 +101,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     // Pause detection: fire .userSpeech early when volatile tokens
     // stop arriving for >1s (Apple's isFinal can lag 2-3s on Chinese).
     private var pauseTimer: Timer?
+    private var sentenceCounter: Int = 0
     private var lastStreamingAttributedTokens: [SpeakerAttributedToken] = []
     /// Pause-commit threshold in seconds. When no new user tokens arrive
     /// for this duration, `.userSpeech` fires early (before isFinal).
@@ -372,6 +373,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     // utterance's tokens get appended to the old task's stream,
                     // mixing "真的吗" residue into "今天天气怎么样".
                     self.engine.sttManager.rotateTask()
+                    self.sentenceCounter += 1
                 } else {
                     self.buildStreamingTokens(newTokens)
                     // Build attributed tokens from accumulated currentTokens.
@@ -719,6 +721,8 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     private func logTokenRecognition(token: TokenSegment, isFinal: Bool) {
         let logEntry: [String: Any] = [
             "timestamp": Date().timeIntervalSince1970,
+            "sentenceId": sentenceCounter,
+            "phase": isFinal ? "final" : "streaming",
             "text": token.text,
             "audioTime": token.audioTime,
             "score": token.score,
