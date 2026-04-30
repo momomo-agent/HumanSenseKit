@@ -41,6 +41,15 @@ public struct SpeakerTokenMetadata: Sendable {
     public var faceDistance: Float = 0
     public var speakerSimilarity: Float = 0
     public init() {}
+    public init(jawDelta: Float, jawVelocity: Float, gazeOnScreen: Float, headYaw: Float, headPitch: Float, faceDistance: Float, speakerSimilarity: Float = 0) {
+        self.jawDelta = jawDelta
+        self.jawVelocity = jawVelocity
+        self.gazeOnScreen = gazeOnScreen
+        self.headYaw = headYaw
+        self.headPitch = headPitch
+        self.faceDistance = faceDistance
+        self.speakerSimilarity = speakerSimilarity
+    }
 }
 
 public struct SpeakerAttributedSegment: Identifiable, Sendable {
@@ -118,6 +127,13 @@ public struct SpeakerDebugInfo: Sendable {
     public var lastUserSimilarity: Float = 0
     public var lastJawDelta: Float = 0
     public init() {}
+    public init(userEmbeddingStatus: String, embeddingCount: Int, ttsWindowActive: Bool, lastUserSimilarity: Float, lastJawDelta: Float) {
+        self.userEmbeddingStatus = userEmbeddingStatus
+        self.embeddingCount = embeddingCount
+        self.ttsWindowActive = ttsWindowActive
+        self.lastUserSimilarity = lastUserSimilarity
+        self.lastJawDelta = lastJawDelta
+    }
 }
 
 // MARK: - Legacy Compatibility
