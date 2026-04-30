@@ -425,6 +425,32 @@ public class GazeSpeakerAttributor: ObservableObject {
         return relevant.map { $0.distance }.reduce(0, +) / Float(relevant.count)
     }
 
+    /// Zone features from jawHistory for streaming-phase scoring.
+    /// Returns (jdMean10, jeMean10) — mean jawDelta and mean jawEfficiency
+    /// over a ±10s window around `audioTime`.
+    private func calculateZoneJawFeatures(around audioTime: Double) -> (jdMean10: Float, jeMean10: Float) {
+        let window: Double = 10.0
+        let relevant = jawHistory.filter { abs($0.timestamp - audioTime) <= window }
+        guard relevant.count >= 2 else { return (0, 0) }
+        // Compute per-pair jawDelta and jawEfficiency
+        var deltas: [Float] = []
+        var efficiencies: [Float] = []
+        for i in 1..<relevant.count {
+            let dt = relevant[i].timestamp - relevant[i-1].timestamp
+            let dJaw = abs(relevant[i].jawOpen - relevant[i-1].jawOpen)
+            deltas.append(dJaw)
+            if dJaw > 0.001 && dt > 0 {
+                let vel = dJaw / Float(dt)
+                efficiencies.append(vel / dJaw)
+            } else {
+                efficiencies.append(0)
+            }
+        }
+        let jdMean = deltas.reduce(0, +) / Float(deltas.count)
+        let jeMean = efficiencies.reduce(0, +) / Float(efficiencies.count)
+        return (jdMean, jeMean)
+    }
+
     private func makeSpeakerToken(
         text: String, isUserSpeaker: Bool, score: Float,
         audioTime: Double, endTime: Double,
@@ -448,12 +474,26 @@ public class GazeSpeakerAttributor: ObservableObject {
         let dt = Float(max(0, token.startTime - lastTokenAudioTime))
         lastTokenAudioTime = token.startTime
 
+        // Zone features: computed once per token from jawHistory (10s window).
+        // These are the strongest signals — without them streaming scoring
+        // takes an automatic -3.0 penalty from the default-zero path.
+        let zone = calculateZoneJawFeatures(around: token.startTime)
+        let gazeOn = calculateGazeOnScreenRatio(startTime: token.startTime, endTime: token.endTime)
+        let yawAbs = abs(calculateMeanHeadYaw(startTime: token.startTime, endTime: token.endTime))
+        let pitchAbs = abs(calculateMeanHeadPitch(startTime: token.startTime, endTime: token.endTime))
+        let faceDist = calculateMeanFaceDistance(startTime: token.startTime, endTime: token.endTime)
+
         // Single char: evaluate directly
         if token.text.count <= 1 {
             let result = querySpeakerAtTime(token.startTime)
             let jd = calculateJawDelta(startTime: token.startTime, endTime: token.endTime)
             let jv = calculateJawVelocity(startTime: token.startTime, endTime: token.endTime)
-            let userScore = calculateUserScore(score: result.1, jawDelta: jd, jawVelocity: jv, timeDelta: dt)
+            let jawEff: Float = jd > 0.001 ? jv / jd : 0
+            let userScore = calculateUserScore(
+                score: result.1, jawDelta: jd, jawVelocity: jv, timeDelta: dt,
+                jawEff: jawEff, jdMean10: zone.jdMean10, jeMean10: zone.jeMean10,
+                gazeOnScreen: gazeOn, headYawAbs: yawAbs, headPitchAbs: pitchAbs, faceDistance: faceDist
+            )
             let isUser = userScore >= perTokenThreshold
             let seg = makeSpeakerToken(
                 text: token.text, isUserSpeaker: isUser, score: result.1,
@@ -479,7 +519,12 @@ public class GazeSpeakerAttributor: ObservableObject {
             let result = querySpeakerAtTime(charTime)
             let jd = calculateJawDelta(startTime: charTime, endTime: charEndTime)
             let jv = calculateJawVelocity(startTime: charTime, endTime: charEndTime)
-            let userScore = calculateUserScore(score: result.1, jawDelta: jd, jawVelocity: jv, timeDelta: dt)
+            let jawEff: Float = jd > 0.001 ? jv / jd : 0
+            let userScore = calculateUserScore(
+                score: result.1, jawDelta: jd, jawVelocity: jv, timeDelta: dt,
+                jawEff: jawEff, jdMean10: zone.jdMean10, jeMean10: zone.jeMean10,
+                gazeOnScreen: gazeOn, headYawAbs: yawAbs, headPitchAbs: pitchAbs, faceDistance: faceDist
+            )
             let isUser = userScore >= perTokenThreshold
 
             if currentSpeaker == nil {
