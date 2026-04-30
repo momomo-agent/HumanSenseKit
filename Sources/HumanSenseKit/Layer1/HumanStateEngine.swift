@@ -199,18 +199,22 @@ public class HumanStateEngine {
     }
 
     private func tickSampleClock() {
-        // Always pull the latest snapshot — humanState.face will hold the
-        // last good face tick (jaw / gaze / head forward), humanState.audio
-        // is updated every audio buffer (~50Hz) by AudioDetectionManager
-        // through the combineLatest binding. If face tracking has been
-        // stalled, the face fields here are simply the last good ones,
-        // which is exactly what we want for short interruptions.
+        // Pull face from humanState (last good values during ARSession
+        // stalls) but pull audio DIRECTLY from audioManager.audioState,
+        // not from humanState.audio. The latter is mirrored by the
+        // combineLatest sink in setupBindings(), which only fires when
+        // BOTH faceState and audioState publish new values — if face
+        // stalls, humanState.audio.volume freezes too, even though
+        // audioManager keeps receiving live RMS from every audio buffer.
+        // Reading audioManager directly bypasses that gating so the
+        // reconstructor sees real-time volume regardless of face
+        // tracking state.
         let face = humanState.face
-        let audio = humanState.audio
+        let liveVolume = audioManager.audioState.volume
         sttManager.userSentenceReconstructor.recordSample(
             ts: Date().timeIntervalSince1970,
             jaw: face.jawOpen,
-            vol: audio.volume,
+            vol: liveVolume,
             gaze: face.isLookingAtScreen,
             headFwd: face.headOrientation.isFacingForward
         )
