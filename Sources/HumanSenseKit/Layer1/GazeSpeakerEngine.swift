@@ -844,9 +844,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     /// Token-level classification for media scene.
-    /// User tokens have jaw >= 0.2 (background video/audio has jaw < 0.1).
+    /// User tokens have jaw >= 0.2 AND short text (background video accumulates long text).
     private func classifyTokenInMediaScene(_ token: TokenSegment) -> Bool {
-        return token.jawDelta >= 0.2
+        return token.jawDelta >= 0.2 && token.text.count <= 15
     }
 
     // MARK: - Logging
