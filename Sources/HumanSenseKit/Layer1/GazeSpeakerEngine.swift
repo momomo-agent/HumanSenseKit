@@ -360,6 +360,12 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     }
                     // Reset dedup after final — next utterance is a new turn.
                     self.lastEmittedUserSpeechText = ""
+
+                    // Always rotate STT task after isFinal, regardless of
+                    // whether userSpeech was emitted. Without this, the next
+                    // utterance's tokens get appended to the old task's stream,
+                    // mixing "真的吗" residue into "今天天气怎么样".
+                    self.engine.sttManager.rotateTask()
                 } else {
                     self.buildStreamingTokens(newTokens)
                     // Emit the *accumulated* currentTokens (with prefix preserved
