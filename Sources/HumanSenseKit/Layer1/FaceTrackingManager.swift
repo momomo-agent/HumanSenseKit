@@ -144,8 +144,10 @@ extension FaceTrackingManager: ARSessionDelegate {
             self.onARFrame?(frame)
             if noFaceFrames >= noFaceThreshold {
                 Task { @MainActor in
-                    self.faceState.faceDetected = false
-                    self.faceState.isLookingAtScreen = false
+                    // Reset all face state to defaults when face disappears.
+                    // Without this, UI reads stale values (jawOpen, gaze, etc.)
+                    // and shows indicators as if user is still present.
+                    self.faceState = FaceState()
                 }
             }
             return
@@ -161,8 +163,7 @@ extension FaceTrackingManager: ARSessionDelegate {
             untrackedFrames += 1
             if untrackedFrames >= noFaceThreshold {
                 Task { @MainActor in
-                    self.faceState.faceDetected = false
-                    self.faceState.isLookingAtScreen = false
+                    self.faceState = FaceState()
                 }
             }
             // Continue to extract blendShapes even when untracked
