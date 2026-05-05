@@ -811,18 +811,14 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // 0.19 separates cleanly (user min 0.198 vs FP max 0.182)
         if jawMean < 0.19 { return false }
 
-        // L1a: Pitch reject — head tilted up means looking at another person, not phone/screen
-        // User pitch: 0.22-0.44 (looking down at device)
-        // Ambient pitch: 0.49-0.64 (head level or up, looking at people)
-        // 0.46 gives margin above user max (0.438) while catching ambient
-        if pitchMean > 0.46 { return false }
-
         // L1b: Gaze reject — not looking at screen = not talking to device
         // User gaze: 0.41-0.94, ambient gaze when jaw active: 0.04-0.55
         if gazeMean < 0.28 { return false }
 
-        // L2: Strong accept — jaw + gaze + pitch all clearly indicate user
-        if jawMean >= 0.25 && gazeMean >= 0.35 && pitchMean < 0.44 {
+        // L2: Strong accept — jaw + gaze both clearly indicate user
+        // Pitch is NOT a hard gate here because it depends on phone angle.
+        // User with phone on table has pitch ~0.7, same as ambient.
+        if jawMean >= 0.25 && gazeMean >= 0.50 {
             if yawMean > 0.55 { return false }
             if highVariance { return false }
             return true
@@ -833,7 +829,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
         var support = 0
         if gazeMean >= 0.35 { support += 1 }
-        if pitchMean < 0.42 { support += 1 }
+        if pitchMean < 0.50 { support += 1 }  // pitch as soft signal, not hard gate
         if distMean < 0.45  { support += 1 }
         if yawMean < 0.15   { support += 1 }
         if scoreMean >= 0.7 { support += 1 }
