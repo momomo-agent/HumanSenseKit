@@ -79,6 +79,8 @@ public class HumanStateEngine {
     /// True if isCorrelated has ever been true during the current session.
     private(set) var sessionIsUserSpeaking: Bool = false
     /// Debug counters for the current speech session (exposed to UI).
+    private var sessionUncorrFrames: Int = 0
+    private static let uncorrUnlatchThreshold = 45  // ~750ms at 60fps
     public private(set) var sessionFrameCount: Int = 0
     public private(set) var sessionLookAtCount: Int = 0
     public private(set) var sessionCorrCount: Int = 0
@@ -385,6 +387,7 @@ public class HumanStateEngine {
             sessionFrameCount = 0
             sessionLookAtCount = 0
             sessionCorrCount = 0
+            sessionUncorrFrames = 0
         }
         if sessionActive {
             sessionFrameCount += 1
@@ -394,26 +397,32 @@ public class HumanStateEngine {
             if isCorrNow {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true
+                sessionUncorrFrames = 0  // reset uncorr counter on any corr frame
+            } else if sessionIsUserSpeaking {
+                sessionUncorrFrames += 1
             }
             // Fallback latch: if lipCorr hasn't warmed up yet (~500ms)
             // but user is clearly looking at screen + head forward + jaw
-            // actively moving, latch as user speaking. This fixes the
-            // "blue light not showing" bug where lipCorr baseline was
-            // inflated and correlation stayed at 0.
+            // actively moving, latch as user speaking.
             if !sessionIsUserSpeaking && lookAt && headForward {
                 let jawNow = face.jawOpen
                 if jawNow > 0.25 && sessionFrameCount >= 10 {
-                    // Require lookAt ratio > 80% over the session so far
                     let lookRatio = Float(sessionLookAtCount) / Float(max(sessionFrameCount, 1))
                     if lookRatio > 0.8 {
                         sessionIsUserSpeaking = true
+                        sessionUncorrFrames = 0
                     }
                 }
             }
-            // Unlatch: if user stops looking at screen for extended period
-            // during an active session, they're probably not the speaker.
-            // This prevents TV audio from keeping sessionIsUserSpeaking=true
-            // when user looks away (Bug 2: ambient speech false trigger).
+            // Unlatch on sustained uncorrelation: if user spoke, then stopped
+            // but audio continues (TV/bystander), lip-audio correlation drops.
+            // After ~750ms of no correlation, unlatch. This handles the case
+            // where voiceActive never goes false (TV fills the silence gap)
+            // so the session never resets.
+            if sessionIsUserSpeaking && sessionUncorrFrames >= Self.uncorrUnlatchThreshold {
+                sessionIsUserSpeaking = false
+            }
+            // Also unlatch on gaze: not looking at screen for most of session.
             if sessionIsUserSpeaking && !lookAt && sessionFrameCount > 30 {
                 let lookRatio = Float(sessionLookAtCount) / Float(max(sessionFrameCount, 1))
                 if lookRatio < 0.3 {
