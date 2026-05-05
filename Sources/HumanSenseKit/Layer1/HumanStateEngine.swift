@@ -80,7 +80,7 @@ public class HumanStateEngine {
     private(set) var sessionIsUserSpeaking: Bool = false
     /// Debug counters for the current speech session (exposed to UI).
     private var sessionUncorrFrames: Int = 0
-    private static let uncorrUnlatchThreshold = 45  // ~750ms at 60fps
+    private static let uncorrUnlatchThreshold = 90  // ~1.5s at 60fps (matches correlation window)
     public private(set) var sessionFrameCount: Int = 0
     public private(set) var sessionLookAtCount: Int = 0
     public private(set) var sessionCorrCount: Int = 0
