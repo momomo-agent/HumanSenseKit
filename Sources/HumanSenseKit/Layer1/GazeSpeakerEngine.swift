@@ -867,12 +867,19 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             }
             return tokenResults
         } else {
-            // Conversation scene: v5 multi-path sentence-level classification.
-            // All tokens get the same label. Per-token split is unreliable in
-            // conversation mode because attributor's per-char threshold is too
-            // permissive for ambient speech with slight jaw movement.
-            let sentenceIsUser = classifyConversationScene(tokens, isFinal: isFinal)
-            return Array(repeating: sentenceIsUser, count: tokens.count)
+            // Conversation scene: two strategies depending on phase.
+            // Final: sentence-level gate (conservative, prevents LLM mis-trigger)
+            // Streaming: per-token classification (shows user chars immediately)
+            if isFinal {
+                let sentenceIsUser = classifyConversationScene(tokens, isFinal: true)
+                return Array(repeating: sentenceIsUser, count: tokens.count)
+            } else {
+                // Streaming: per-token classification.
+                // Each token is classified independently by its own gaze/jaw/yaw.
+                // This allows showing only the chars the user actually said,
+                // filtering out ambient prefix/suffix in the same STT sentence.
+                return tokens.map { classifyTokenForStreaming($0) }
+            }
         }
     }
 
@@ -880,6 +887,40 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// User tokens have jaw >= 0.2 AND short text (background video accumulates long text).
     private func classifyTokenInMediaScene(_ token: TokenSegment) -> Bool {
         return token.jawDelta >= 0.2 && token.text.count <= 15
+    }
+
+    /// Per-token classification for conversation scene streaming.
+    /// More permissive than sentence-level (single token = noisy signal),
+    /// but filters out clearly ambient tokens (not looking, head turned away,
+    /// or no lip-audio correlation).
+    private func classifyTokenForStreaming(_ token: TokenSegment) -> Bool {
+        // Must have session latch (lip-audio correlation or fallback)
+        // to show any streaming at all — prevents ambient-only sessions
+        // from showing random chars.
+        if !engine.sessionIsUserSpeaking { return false }
+
+        // Hard reject: clearly not looking at screen
+        if token.gazeOnScreen < 0.15 { return false }
+
+        // Hard reject: head turned far away
+        if abs(token.headYaw) > 0.55 { return false }
+
+        // Lip-audio correlation: if available and clearly negative,
+        // the mouth isn't matching the audio → someone else is speaking.
+        let corr = engine.lipAudioCorrelator.correlation
+        if corr < -0.1 { return false }
+
+        // Accept: looking at screen + any jaw activity + positive correlation
+        if token.gazeOnScreen >= 0.40 && token.jawDelta >= 0.05 && corr >= 0.1 {
+            return true
+        }
+
+        // Accept: strong gaze + jaw (even without correlation data)
+        if token.gazeOnScreen >= 0.55 && token.jawDelta >= 0.15 {
+            return true
+        }
+
+        return false
     }
 
     // MARK: - Confidence Score
