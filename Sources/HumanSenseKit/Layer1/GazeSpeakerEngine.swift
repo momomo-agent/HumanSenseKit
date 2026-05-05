@@ -783,11 +783,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
-        // Session gate: require sessionIsUserSpeaking (lip-audio correlation
-        // or fallback latch confirmed user is the one speaking).
-        // Applied to BOTH streaming and final — if the session never confirmed
-        // user speaking, final should not trigger LLM either.
-        if !engine.sessionIsUserSpeaking {
+        // Session gate for FINAL only: require sessionIsUserSpeaking before
+        // triggering LLM. Streaming tokens are shown more permissively so
+        // the user gets immediate visual feedback while session bootstraps.
+        if isFinal && !engine.sessionIsUserSpeaking {
             return false
         }
 
