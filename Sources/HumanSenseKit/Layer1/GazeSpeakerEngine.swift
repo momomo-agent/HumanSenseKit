@@ -437,6 +437,11 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         lastStreamingAttributedTokens = []
         guard !tokens.isEmpty else { return }
 
+        // Real-time gate: if user has stopped speaking (session unlatched)
+        // by the time pause fires, this is likely TV/ambient continuation.
+        // Don't emit — prevents "second sentence" bug after user finishes.
+        if !engine.sessionIsUserSpeaking { return }
+
         // Sandwich repair: if a non-user token sits between two user tokens
         // in a continuous utterance, it's almost certainly the same speaker.
         // Promote isolated non-user tokens to .user when surrounded by .user.
@@ -783,6 +788,15 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
+        // Real-time session gate: if HumanStateEngine has unlatched
+        // sessionIsUserSpeaking (user stopped talking, TV took over),
+        // reject immediately. This catches the case where token-level
+        // gaze snapshots are stale (captured when user was still looking)
+        // but user has since stopped speaking.
+        if !engine.sessionIsUserSpeaking && !isFinal {
+            return false
+        }
+
         let n = Float(tokens.count)
 
         let jawMean = tokens.reduce(Float(0)) { $0 + $1.jawDelta } / n
