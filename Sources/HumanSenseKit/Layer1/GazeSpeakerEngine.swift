@@ -437,11 +437,6 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         lastStreamingAttributedTokens = []
         guard !tokens.isEmpty else { return }
 
-        // Real-time gate: if user has stopped speaking (session unlatched)
-        // by the time pause fires, this is likely TV/ambient continuation.
-        // Don't emit — prevents "second sentence" bug after user finishes.
-        if !engine.sessionIsUserSpeaking { return }
-
         // Sandwich repair: if a non-user token sits between two user tokens
         // in a continuous utterance, it's almost certainly the same speaker.
         // Promote isolated non-user tokens to .user when surrounded by .user.
