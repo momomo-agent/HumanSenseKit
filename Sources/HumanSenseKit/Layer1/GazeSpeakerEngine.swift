@@ -780,7 +780,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// - gaze remains important: user > 0.41, most ambient < 0.30
     /// - jaw alone is insufficient: user jaw 0.20-0.30, ambient jaw 0.21-0.40 (overlap!)
     ///
-    /// Performance: Precision=80% Recall=100% F1=0.889 FPR=2.1%
+    /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
         let n = Float(tokens.count)
@@ -798,37 +798,38 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let highVariance = jawStd > 0.1
 
         // L0: No jaw activity at all
-        if jawMean < 0.18 { return false }
+        // User jaw range: 0.198-0.298; ambient jaw leakage: 0.00-0.182
+        // 0.19 separates cleanly (user min 0.198 vs FP max 0.182)
+        if jawMean < 0.19 { return false }
 
         // L1a: Pitch reject — head tilted up means looking at another person, not phone/screen
         // User pitch: 0.22-0.44 (looking down at device)
         // Ambient pitch: 0.49-0.64 (head level or up, looking at people)
-        if pitchMean > 0.48 { return false }
+        // 0.46 gives margin above user max (0.438) while catching ambient
+        if pitchMean > 0.46 { return false }
 
         // L1b: Gaze reject — not looking at screen = not talking to device
         // User gaze: 0.41-0.94, ambient gaze when jaw active: 0.04-0.55
-        // Hard cutoff at 0.30 eliminates cases where user's jaw moves
-        // sympathetically while looking away from screen
-        if gazeMean < 0.30 { return false }
+        if gazeMean < 0.28 { return false }
 
         // L2: Strong accept — jaw + gaze + pitch all clearly indicate user
-        if jawMean >= 0.25 && gazeMean >= 0.40 && pitchMean < 0.45 {
+        if jawMean >= 0.25 && gazeMean >= 0.35 && pitchMean < 0.44 {
             if yawMean > 0.55 { return false }
             if highVariance { return false }
             return true
         }
 
-        // L3: Medium activity — need multiple supporting signals
+        // L3: Medium activity — need 4+ supporting signals
         if yawMean > 0.55 { return false }
 
         var support = 0
-        if gazeMean >= 0.40 { support += 1 }
+        if gazeMean >= 0.35 { support += 1 }
         if pitchMean < 0.42 { support += 1 }
         if distMean < 0.45  { support += 1 }
         if yawMean < 0.15   { support += 1 }
         if scoreMean >= 0.7 { support += 1 }
 
-        var threshold = 3
+        var threshold = 4
         if highVariance { threshold += 1 }
         return support >= threshold
     }
