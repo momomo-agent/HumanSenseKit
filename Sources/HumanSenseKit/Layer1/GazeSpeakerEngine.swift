@@ -359,7 +359,19 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     }
 
                     let userText = userTokens.map(\.text).joined()
-                    if !userText.isEmpty && userText != self.lastEmittedUserSpeechText {
+                    // Dedup: skip if pause-commit already emitted this (or a close variant).
+                    // STT often revises text between pause-commit and final (e.g. "现在放假呢" vs "现放假呢"),
+                    // so use containment check instead of exact equality.
+                    let isDuplicate: Bool = {
+                        guard !userText.isEmpty, !self.lastEmittedUserSpeechText.isEmpty else { return false }
+                        let prev = self.lastEmittedUserSpeechText
+                        // Either one contains the other, or they share >60% characters
+                        if prev.contains(userText) || userText.contains(prev) { return true }
+                        let common = Set(prev).intersection(Set(userText)).count
+                        let maxLen = max(prev.count, userText.count)
+                        return maxLen > 0 && Float(common) / Float(maxLen) > 0.6
+                    }()
+                    if !userText.isEmpty && !isDuplicate {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
@@ -779,7 +791,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let highVariance = jawStd > 0.1
 
         // Level 1: Reject gate — jaw below speaking baseline
-        if jawMean < 0.21 { return false }
+        // 0.25 calibrated from real-world data: user speech jawMean typically 0.30+,
+        // ambient leakage (user chewing/smiling while others talk) typically 0.15-0.22
+        if jawMean < 0.25 { return false }
 
         // Level 2: Strong accept — clear speech with consistent jaw and gaze
         if jawMean >= 0.35 && jawVMean >= 2.0 {
@@ -794,12 +808,12 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             if yawMean > 0.55 { return false }
 
             var support = 0
-            if gazeMean >= 0.15 { support += 1 }
+            if gazeMean >= 0.30 { support += 1 }  // tightened from 0.15: require clearer gaze
             if scoreMean >= 0.7 { support += 1 }
             if distMean < 0.52  { support += 1 }
             if yawMean < 0.4    { support += 1 }
 
-            var threshold = isFinal ? 1 : 2
+            var threshold = isFinal ? 2 : 2  // tightened: always require 2+ support signals
             if highVariance { threshold += 1 } // Require more support if jaw is noisy
             return support >= threshold
         }
