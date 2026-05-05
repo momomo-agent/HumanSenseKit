@@ -783,12 +783,11 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
-        // Real-time session gate: if HumanStateEngine has unlatched
-        // sessionIsUserSpeaking (user stopped talking, TV took over),
-        // reject immediately. This catches the case where token-level
-        // gaze snapshots are stale (captured when user was still looking)
-        // but user has since stopped speaking.
-        if !engine.sessionIsUserSpeaking && !isFinal {
+        // Session gate: require sessionIsUserSpeaking (lip-audio correlation
+        // or fallback latch confirmed user is the one speaking).
+        // Applied to BOTH streaming and final — if the session never confirmed
+        // user speaking, final should not trigger LLM either.
+        if !engine.sessionIsUserSpeaking {
             return false
         }
 

@@ -328,10 +328,13 @@ public class HumanStateEngine {
 
         // Sync state to STT manager
         sttManager.isLookingAtScreen = face.isLookingAtScreen
-        let activitySpeaking = humanState.activity.isSpeaking
-        if sttManager.isSpeaking != activitySpeaking {
-            sttManager.isSpeaking = activitySpeaking
-            if activitySpeaking {
+        // Use sessionIsUserSpeaking (from lip-audio correlation / fallback latch)
+        // instead of activity.isSpeaking to avoid circular dependency:
+        // activity needs hasRecentUserSegment → segment.isFromUser needs isSpeaking → isSpeaking needs activity
+        let speakingNow = sessionIsUserSpeaking
+        if sttManager.isSpeaking != speakingNow {
+            sttManager.isSpeaking = speakingNow
+            if speakingNow {
                 sttManager.captureSpeechStartState()
             }
         }
@@ -406,7 +409,7 @@ public class HumanStateEngine {
             // actively moving, latch as user speaking.
             if !sessionIsUserSpeaking && lookAt && headForward {
                 let jawNow = face.jawOpen
-                if jawNow > 0.25 && sessionFrameCount >= 10 {
+                if jawNow > 0.15 && sessionFrameCount >= 10 {
                     let lookRatio = Float(sessionLookAtCount) / Float(max(sessionFrameCount, 1))
                     if lookRatio > 0.8 {
                         sessionIsUserSpeaking = true
