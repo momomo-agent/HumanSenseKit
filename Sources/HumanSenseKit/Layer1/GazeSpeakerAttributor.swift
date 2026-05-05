@@ -59,7 +59,7 @@ public class GazeSpeakerAttributor: ObservableObject {
 
     // MARK: - Public Thresholds (tunable)
 
-    public var speakerThreshold: Float = 4.75
+    public var speakerThreshold: Float = 4.5
     public var perTokenThreshold: Float = -1.25
     public var scoreWeight: Float = 0.5
     public var jawWeight: Float = 1.5
@@ -744,43 +744,68 @@ public class GazeSpeakerAttributor: ObservableObject {
         return result
     }
 
-    // MARK: - Private: User Score (v112 optimal)
+    // MARK: - Private: User Score (v135b — dual-path: gaze-enhanced + legacy fallback)
 
     private func calculateUserScore(
         score: Float, jawDelta: Float, jawVelocity: Float, timeDelta: Float = 0,
         jawEff: Float = 0, scoreVelAnti: Float = 0, dtZeroRatio5: Float = 0,
         jdMean10: Float = 0, jeMean10: Float = 0, finalScore: Float = 0,
         isHighJW: Bool = false, zoneScoreMean: Float = 0,
-        gazeOnScreen: Float = 1, headYawAbs: Float = 0, headPitchAbs: Float = 0, faceDistance: Float = 0.5
+        gazeOnScreen: Float = -1, headYawAbs: Float = 0, headPitchAbs: Float = 0, faceDistance: Float = 0.5
     ) -> Float {
         var votes: Float = 0
 
-        // Gaze gate
-        if gazeOnScreen < 0.3 { votes -= 4.0 }
-        else if gazeOnScreen < 0.5 { votes -= 2.0 }
-        else if gazeOnScreen >= 0.8 { votes += 1.0 }
+        // Determine if we have real gaze data.
+        // gazeOnScreen == -1 means caller didn't provide gaze → use legacy path.
+        // gazeOnScreen >= 0 means face tracking is active → use gaze-enhanced path.
+        let hasGaze = gazeOnScreen >= 0
 
-        // Head yaw
-        if headYawAbs > 0.4 { votes -= 2.0 }
-        else if headYawAbs > 0.15 { votes -= 1.0 }
+        if hasGaze {
+            // === Gaze-enhanced path (v135b: calibrated from real-world multi-speaker data) ===
 
-        // Head pitch
-        if headPitchAbs > 0.4 { votes -= 2.0 }
-        else if headPitchAbs > 0.25 { votes -= 1.0 }
+            // Gaze: user typically >= 0.4, non-user typically 0
+            if gazeOnScreen >= 0.4 { votes += 1.5 }
+            else if gazeOnScreen >= 0.2 { votes += 0.5 }
+            else if gazeOnScreen < 0.05 { votes -= 1.5 }
 
-        // Distance
-        if faceDistance > 1.5 { votes -= 1.5 }
-        else if faceDistance > 1.0 { votes -= 0.5 }
+            // Head pitch: user 0.35-0.50, non-user 0.55-0.86
+            if headPitchAbs > 0.5 { votes -= 2.0 }
+            else if headPitchAbs > 0.4 { votes -= 0.5 }
+            else { votes += 0.5 }
+
+            // Head yaw
+            if headYawAbs > 0.5 { votes -= 1.5 }
+            else if headYawAbs > 0.4 { votes -= 0.5 }
+
+            // Distance
+            if faceDistance > 1.5 { votes -= 1.5 }
+            else if faceDistance > 1.0 { votes -= 0.5 }
+
+            // Embedding score: only penalize when pose confirms non-user
+            if score >= 0.7 && gazeOnScreen < 0.2 { votes -= 2.0 }
+            else if score >= 0.85 { votes -= 1.0 }
+        } else {
+            // === Legacy path (no gaze data available) ===
+            if finalScore >= 0.7 { votes -= 3.5 }
+            if zoneScoreMean >= 0.7 { votes -= 1.5 }
+            if score >= 0.55 { votes -= 3.0 }
+        }
+
+        // === Physical features (both paths) ===
 
         // Zone feature: 10s jaw activity (strongest signal)
-        if jdMean10 >= 0.03 && jeMean10 >= 5 { votes += 4.5 }
+        if hasGaze {
+            if jdMean10 >= 0.03 && jeMean10 >= 5 { votes += 3.5 }
+        } else {
+            if jdMean10 >= 0.03 && jeMean10 >= 5 { votes += 4.5 }
+        }
 
         // Positive votes
-        if jawVelocity >= 0.5 { votes += 1.5 }
+        if jawVelocity >= 0.5 { votes += (hasGaze ? 2.0 : 1.5) }
         else if jawVelocity >= 0.1 { votes += 0.6 }
 
-        if jawDelta >= 0.05 { votes += 1.5 }
-        else if jawDelta >= 0.02 { votes += 0.6 }
+        if jawDelta >= 0.05 { votes += (hasGaze ? 2.0 : 1.5) }
+        else if jawDelta >= 0.02 { votes += (hasGaze ? 0.8 : 0.6) }
 
         if jawEff >= 5 { votes += 0.5 }
         if scoreVelAnti >= 0.2 { votes += 0.5 }
@@ -791,11 +816,6 @@ public class GazeSpeakerAttributor: ObservableObject {
         // Penalties
         if jdMean10 < 0.005 { votes -= 2.0 }
         if jeMean10 < 1.5 { votes -= 1.0 }
-        if finalScore >= 0.7 { votes -= 3.5 }
-        if zoneScoreMean >= 0.7 { votes -= 1.5 }
-
-        // v16: Direct speaker embedding penalty
-        if score >= 0.55 { votes -= 3.0 }
 
         return votes
     }
