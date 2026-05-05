@@ -114,8 +114,11 @@ public class LipAudioCorrelator {
     private let lipStdThreshold: Float = 0.02  // lip std above this = mouth is moving
     private let audioStdThreshold: Float = 0.001  // audio std above this = sound present
 
-    // Baseline tracking
-    private let baselineAlpha: Float = 0.005
+    // Baseline tracking — asymmetric alpha:
+    // Rise slowly (don't let speech inflate baseline)
+    // Fall quickly (recover after speech ends)
+    private let baselineAlphaUp: Float = 0.001    // slow rise: ~1000 frames to converge
+    private let baselineAlphaDown: Float = 0.05   // fast fall: ~20 frames to converge
     private var lipBaseline: Float = 0
     private var baselineInitialized = false
 
@@ -205,17 +208,15 @@ public class LipAudioCorrelator {
                      + face.mouthStretchRight
         lipActivity = activity
 
-        // Track resting baseline - only update when audio is quiet (not speaking)
-        // This prevents the baseline from tracking speech activity and zeroing out the signal
+        // Track resting baseline with asymmetric alpha:
+        // - When activity < baseline: baseline drops fast (user stopped speaking)
+        // - When activity > baseline: baseline rises slowly (don't inflate during speech)
         if !baselineInitialized {
             lipBaseline = activity
             baselineInitialized = true
         } else {
-            // Only adapt baseline when audio is quiet (RMS < 0.001)
-            // This keeps the baseline at the resting state, not the speaking state
-            if audioRMS < 0.001 {
-                lipBaseline = baselineAlpha * activity + (1 - baselineAlpha) * lipBaseline
-            }
+            let alpha = activity < lipBaseline ? baselineAlphaDown : baselineAlphaUp
+            lipBaseline = alpha * activity + (1 - alpha) * lipBaseline
         }
 
         let lipDeviation = max(0, activity - lipBaseline)
