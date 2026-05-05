@@ -809,15 +809,19 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // Two paths: looking at screen (lenient) vs not looking (strict)
 
         // Hard reject: no jaw activity at all
-        if jawMean < 0.10 { return false }
+        if jawMean < 0.15 { return false }
 
         // Hard reject: turned away
         if yawMean > 0.40 { return false }
 
+        // Hard reject: not looking at screen at all (strongest anti-FP signal)
+        // User who is NOT talking to device has gaze < 0.20 typically
+        if gazeMean < 0.20 { return false }
+
         // Path A: Looking at screen (gaze >= 0.35)
         if gazeMean >= 0.35 {
             // Accept if jaw is clearly active
-            if jawMean >= 0.18 {
+            if jawMean >= 0.20 {
                 if jawStd > 0.15 { return false }  // noisy jaw = background
                 return true
             }
@@ -828,9 +832,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             return false
         }
 
-        // Path B: Not looking at screen (gaze < 0.35)
+        // Path B: Not looking at screen (gaze 0.20-0.35)
         // Need stronger evidence: jaw + close distance + low yaw
-        if jawMean >= 0.30 && distMean < 0.55 && yawMean < 0.30 {
+        if jawMean >= 0.30 && distMean < 0.55 && yawMean < 0.25 {
             return true
         }
 
@@ -867,20 +871,12 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
             }
             return tokenResults
         } else {
-            // Conversation scene: v5 multi-path sentence gate + per-token labels
-            // Step 1: sentence-level gate (is there ANY user speech in this sentence?)
-            let sentenceHasUser = classifyConversationScene(tokens, isFinal: isFinal)
-            
-            if !sentenceHasUser {
-                // Sentence rejected entirely — no user speech
-                return Array(repeating: false, count: tokens.count)
-            }
-            
-            // Step 2: preserve per-token labels from processTokens (isUserSpeaker)
-            // This allows splitting "ambient prefix + user speech" within one sentence.
-            // Each token's isUserSpeaker was set by GazeSpeakerAttributor's per-char
-            // diarization (jawDelta, jawVelocity, gazeOnScreen at that char's time).
-            return tokens.map { $0.isUserSpeaker }
+            // Conversation scene: v5 multi-path sentence-level classification.
+            // All tokens get the same label. Per-token split is unreliable in
+            // conversation mode because attributor's per-char threshold is too
+            // permissive for ambient speech with slight jaw movement.
+            let sentenceIsUser = classifyConversationScene(tokens, isFinal: isFinal)
+            return Array(repeating: sentenceIsUser, count: tokens.count)
         }
     }
 
