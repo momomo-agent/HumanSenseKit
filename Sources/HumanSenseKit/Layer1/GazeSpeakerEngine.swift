@@ -803,28 +803,26 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let jawStd = sqrtf(jawVariance)
 
         // === v5 Multi-Path Classifier ===
-        // Optimized on 94 real-world sentences: F1=0.800, Precision=94.7%, Recall=69.2%
         // Two paths: looking at screen (lenient) vs not looking (strict)
-
-        // Hard reject: no jaw activity at all
-        if jawMean < 0.15 { return false }
 
         // Hard reject: turned away
         if yawMean > 0.40 { return false }
 
-        // Hard reject: not looking at screen at all (strongest anti-FP signal)
-        // User who is NOT talking to device has gaze < 0.20 typically
+        // Hard reject: not looking at screen at all
         if gazeMean < 0.20 { return false }
 
         // Path A: Looking at screen (gaze >= 0.35)
+        // Very lenient for streaming (user is clearly engaged with device)
         if gazeMean >= 0.35 {
-            // Accept if jaw is clearly active
-            if jawMean >= 0.20 {
+            // Any jaw activity at all → accept for streaming
+            // For final, require slightly more jaw to avoid ambient triggers
+            let jawThreshold: Float = isFinal ? 0.12 : 0.05
+            if jawMean >= jawThreshold {
                 if jawStd > 0.15 { return false }  // noisy jaw = background
                 return true
             }
-            // Lower jaw but looking → accept if pitch indicates close/engaged
-            if pitchMean < 0.55 {
+            // No jaw but looking + close pitch → still accept (whispering)
+            if pitchMean < 0.55 && !isFinal {
                 return true
             }
             return false
@@ -832,7 +830,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
         // Path B: Not looking at screen (gaze 0.20-0.35)
         // Need stronger evidence: jaw + close distance + low yaw
-        if jawMean >= 0.30 && distMean < 0.55 && yawMean < 0.25 {
+        if jawMean >= 0.25 && distMean < 0.55 && yawMean < 0.25 {
             return true
         }
 
