@@ -404,14 +404,16 @@ public class HumanStateEngine {
             } else if sessionIsUserSpeaking {
                 sessionUncorrFrames += 1
             }
-            // Fallback latch: if lipCorr hasn't warmed up yet (~500ms)
+            // Fallback latch: if lipCorr hasn't warmed up yet
             // but user is clearly looking at screen + head forward + jaw
             // actively moving, latch as user speaking.
+            // Threshold lowered to 5 frames (~83ms) for faster response
+            // after forceEndSession resets the session counters.
             if !sessionIsUserSpeaking && lookAt && headForward {
                 let jawNow = face.jawOpen
-                if jawNow > 0.15 && sessionFrameCount >= 10 {
+                if jawNow > 0.12 && sessionFrameCount >= 5 {
                     let lookRatio = Float(sessionLookAtCount) / Float(max(sessionFrameCount, 1))
-                    if lookRatio > 0.8 {
+                    if lookRatio > 0.7 {
                         sessionIsUserSpeaking = true
                         sessionUncorrFrames = 0
                     }
@@ -511,10 +513,15 @@ public class HumanStateEngine {
 
     /// Force-end the current speaking session. Called after .userSpeech is
     /// emitted so that TTS won't be blocked by stale isSpeaking state.
-    /// The next voice rising edge will start a fresh session.
+    /// Only clears the speaking verdict; keeps sessionActive so the fallback
+    /// latch (lookAt + headForward + jaw) can re-latch within the same
+    /// voice session (important when background noise keeps voiceActive true).
     public func forceEndSession() {
         sessionIsUserSpeaking = false
-        sessionActive = false
+        sessionUncorrFrames = 0
+        sessionCorrCount = 0
+        sessionFrameCount = 0
+        sessionLookAtCount = 0
         sttManager.isSpeaking = false
     }
 }

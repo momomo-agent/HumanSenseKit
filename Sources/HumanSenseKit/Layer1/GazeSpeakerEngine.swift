@@ -928,24 +928,18 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     /// Per-token classification for conversation scene streaming.
-    /// Uses voiceActive + gaze + headForward to show only user speech.
-    /// The correlator is unreliable (audio update rate << lip 60fps causes
-    /// audioStd ≈ 0), so we use simpler but reliable signals.
+    /// Only shows text when user is speaking TO the screen:
+    /// session latch (voice + looking + jaw) must be active.
+    /// Fallback latch fires in ~5 frames (~83ms) when lookAt + headFwd + jaw.
     private func classifyTokenForStreaming(_ token: TokenSegment) -> Bool {
-        // Hard reject: head turned far away (> 0.45 rad)
+        // Primary gate: session latch confirms user is speaking to device
+        if !engine.sessionIsUserSpeaking { return false }
+
+        // Hard reject: head turned away
         if abs(token.headYaw) > 0.45 { return false }
 
         // Hard reject: not looking at screen
         if token.gazeOnScreen < 0.20 { return false }
-
-        // Must have voice activity (RMS above threshold)
-        // This is the primary gate — no voice = no display
-        guard engine.audioManager.audioState.isSpeaking else { return false }
-
-        // Must be facing forward (head not tilted away)
-        // headForward from HSE combines pitch + yaw
-        // gazeOnScreen already covers this partially, but add explicit check
-        if token.gazeOnScreen < 0.30 && abs(token.headYaw) > 0.30 { return false }
 
         return true
     }
