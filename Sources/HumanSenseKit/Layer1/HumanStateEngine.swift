@@ -78,6 +78,9 @@ public class HumanStateEngine {
     private var sessionActive: Bool = false
     /// True if isCorrelated has ever been true during the current session.
     private(set) var sessionIsUserSpeaking: Bool = false
+    /// Cooldown after forceEndSession — prevents immediate re-latch
+    private var sessionEndCooldownUntil: TimeInterval = 0
+    private static let sessionEndCooldownDuration: TimeInterval = 2.0  // 2s cooldown
     /// Debug counters for the current speech session (exposed to UI).
     private var sessionUncorrFrames: Int = 0
     private static let uncorrUnlatchThreshold = 90  // ~1.5s at 60fps (matches correlation window)
@@ -395,9 +398,14 @@ public class HumanStateEngine {
         if sessionActive {
             sessionFrameCount += 1
             if lookAt { sessionLookAtCount += 1 }
+
+            // Cooldown: don't re-latch immediately after forceEndSession
+            let now = ProcessInfo.processInfo.systemUptime
+            let inCooldown = now < sessionEndCooldownUntil
+
             // Latch on correlation — the primary signal that can tell
             // "user speaking" from "someone else speaking".
-            if isCorrNow {
+            if !inCooldown && isCorrNow {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true
                 sessionUncorrFrames = 0  // reset uncorr counter on any corr frame
@@ -409,7 +417,7 @@ public class HumanStateEngine {
             // actively moving, latch as user speaking.
             // Threshold lowered to 5 frames (~83ms) for faster response
             // after forceEndSession resets the session counters.
-            if !sessionIsUserSpeaking && lookAt && headForward {
+            if !inCooldown && !sessionIsUserSpeaking && lookAt && headForward {
                 let jawNow = face.jawOpen
                 if jawNow > 0.12 && sessionFrameCount >= 5 {
                     let lookRatio = Float(sessionLookAtCount) / Float(max(sessionFrameCount, 1))
@@ -523,6 +531,8 @@ public class HumanStateEngine {
         sessionFrameCount = 0
         sessionLookAtCount = 0
         sttManager.isSpeaking = false
+        // Prevent immediate re-latch from noise/jaw micro-movement
+        sessionEndCooldownUntil = ProcessInfo.processInfo.systemUptime + Self.sessionEndCooldownDuration
     }
 }
 #endif
