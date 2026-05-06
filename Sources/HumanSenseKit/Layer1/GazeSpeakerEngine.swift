@@ -817,11 +817,21 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // Hard reject: negative correlation (someone else is speaking)
         if corr < -0.20 { return false }
 
-        // For final (LLM trigger): require positive corr as primary signal
+        // For final (LLM trigger): accept if session confirmed user speaking
+        // (corr latched during the utterance) OR if instantaneous corr is still
+        // positive. The old check required corr >= 0.20 at isFinal time, but
+        // by then the user has stopped speaking and corr has decayed.
         if isFinal {
-            // Corr must be positive — mouth is matching audio
+            // Path A: session latch — user was confirmed speaking during this
+            // utterance via lip-audio correlation. Trust it.
+            if engine.sessionIsUserSpeaking && gazeMean >= 0.20 {
+                if jawStd > 0.15 { return false }
+                return true
+            }
+            // Path B: instantaneous corr still positive (short utterance where
+            // isFinal arrives before corr decays)
             if corr >= 0.20 && gazeMean >= 0.30 {
-                if jawStd > 0.15 { return false }  // noisy jaw = background
+                if jawStd > 0.15 { return false }
                 return true
             }
             return false
