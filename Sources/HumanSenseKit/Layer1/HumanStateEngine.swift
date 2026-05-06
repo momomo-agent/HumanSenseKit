@@ -508,5 +508,14 @@ public class HumanStateEngine {
         if !lookAt { return .distracted }
         return .listening
     }
+
+    /// Force-end the current speaking session. Called after .userSpeech is
+    /// emitted so that TTS won't be blocked by stale isSpeaking state.
+    /// The next voice rising edge will start a fresh session.
+    public func forceEndSession() {
+        sessionIsUserSpeaking = false
+        sessionActive = false
+        sttManager.isSpeaking = false
+    }
 }
 #endif

@@ -387,6 +387,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                         self.lastEmittedUserSpeechText = userText
                         self.onUserSpeech?(userText)
                         self._eventSubject.send(.userSpeech(text: userText, segment: segment))
+                        // Force-unlatch session so TTS won't be blocked by
+                        // stale isSpeaking state when LLM reply arrives.
+                        self.engine.forceEndSession()
                     }
                     // Reset dedup after final — next utterance is a new turn.
                     self.lastEmittedUserSpeechText = ""
@@ -925,10 +928,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     /// Per-token classification for conversation scene streaming.
-    /// Corr-primary strategy: only accept when lip-audio correlation is
-    /// clearly positive (>= 0.55). This eliminates false positives from
-    /// ambient speech where kenefe is looking at phone but not speaking.
-    /// Precision=100%, Recall=60%, F1=0.75 on v3 test data.
+    /// Accept when session latch is active AND basic gaze/yaw checks pass.
+    /// The session latch itself already validated lip-audio correlation,
+    /// so we don't need a high corr threshold per-token.
     private func classifyTokenForStreaming(_ token: TokenSegment) -> Bool {
         // Must have session latch
         if !engine.sessionIsUserSpeaking { return false }
@@ -939,17 +941,14 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // Hard reject: clearly not looking at screen
         if token.gazeOnScreen < 0.15 { return false }
 
-        // Hard reject: negative correlation (mouth not matching audio)
+        // Hard reject: strong negative correlation (someone else speaking)
         let corr = engine.lipAudioCorrelator.correlation
         if corr < -0.10 { return false }
 
-        // Accept: lip-audio correlation clearly positive
-        // This is the primary signal — kenefe's mouth moves in sync with audio
-        if corr >= 0.55 {
-            return true
-        }
-
-        return false
+        // Session latch is active + basic checks pass = accept
+        // The latch already confirmed lip-audio correlation during this
+        // utterance. No need for per-token corr >= 0.55 which was too strict.
+        return true
     }
 
     // MARK: - Confidence Score
