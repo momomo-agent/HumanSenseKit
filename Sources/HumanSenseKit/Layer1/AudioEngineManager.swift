@@ -85,6 +85,27 @@ public class AudioEngineManager {
         isRunning = false
     }
     
+    // MARK: - Public
+
+    /// Re-install the input tap on the audio engine's inputNode.
+    /// Call this after the host app restarts an external engine (which
+    /// removes all taps via `engine.reset()`). Safe to call multiple
+    /// times — removes any existing tap before installing a new one.
+    func reinstallTap() {
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        let format = inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0 && format.channelCount > 0 else {
+            print("[Audio] reinstallTap: invalid format sr=\(format.sampleRate) ch=\(format.channelCount)")
+            return
+        }
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { @Sendable [weak self] buffer, when in
+            self?.onBuffer?(buffer)
+            self?.onBufferWithTime?(buffer, when)
+        }
+        print("[Audio] Tap re-installed on external engine")
+    }
+
     // MARK: - Private
     
     private func configureAndStart() {

@@ -204,6 +204,13 @@ public class STTManager: NSObject, ObservableObject {
         // old stream timeline and would poison range queries under the
         // new timeline.
         userSentenceReconstructor.clear()
+        // Re-install the input tap. When the host app restarts an external
+        // AVAudioEngine (engine.reset() + engine.start()), all taps are
+        // removed. Without this, STT receives zero audio buffers and
+        // speech recognition silently stops working.
+        if usesExternalEngine {
+            audio.reinstallTap()
+        }
         speech.startTask()
         builder.resetActive()
     }
