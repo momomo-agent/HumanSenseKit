@@ -111,6 +111,9 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Dedup: track last emitted userSpeech text to avoid double-firing
     /// when pause commit fires and then isFinal arrives with same text.
     private var lastEmittedUserSpeechText: String = ""
+    /// Flag: streaming phase classified at least some tokens as user.
+    /// Read by isFinal to bypass stale-data classification.
+    private var streamingHadUserTokens: Bool = false
     public var calibrationProgress: Float = 0.0
     public var isCalibrating = false
 
@@ -340,10 +343,19 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
-                    // Two-layer classification (v10d):
-                    // 1. Token-level: each token gets user/ambient independently
-                    // 2. Sentence-level: overall sentence classification
-                    let classifiedTokens = self.classifyTokens(newTokens, isFinal: true)
+                    // If streaming already classified user tokens, trust that
+                    // verdict. isFinal tokens have stale gaze/corr data (user
+                    // stopped speaking, looked away). Re-classifying with stale
+                    // data causes false rejections.
+                    let classifiedTokens: [Bool]
+                    if self.streamingHadUserTokens {
+                        // All tokens are user — streaming already validated
+                        classifiedTokens = Array(repeating: true, count: newTokens.count)
+                    } else {
+                        classifiedTokens = self.classifyTokens(newTokens, isFinal: true)
+                    }
+                    // Reset for next utterance
+                    self.streamingHadUserTokens = false
                     let overriddenTokens = zip(attributedTokens, classifiedTokens).map { (attr, isUser) in
                         SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
                                                source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
@@ -393,6 +405,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     let hasUserTokens = classifiedTokens.contains(true)
 
                     if hasUserTokens {
+                        self.streamingHadUserTokens = true
                         // Emit tokens with per-token classification
                         let classified = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
                             let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
@@ -783,11 +796,36 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
-        // Session gate removed (4.28.0): corr + gaze + yaw gates below are
-        // sufficient. The old session gate caused isFinal to be rejected
-        // even when streaming had already accepted the same tokens, killing
-        // the pause timer and leaving STT text stuck on screen forever.
+        // === v7 Session-Latch-First Classifier (4.30.1) ===
+        //
+        // Core insight: isFinal tokens reflect the moment isFinal arrives (user
+        // already stopped speaking, looked away). Token-level gaze/corr are
+        // STALE for isFinal. The session latch (sessionIsUserSpeaking) is the
+        // only reliable signal because it was set DURING the utterance.
+        //
+        // For isFinal: trust session latch unconditionally. Streaming already
+        // validated corr+gaze+yaw per-token; isFinal just confirms "sentence
+        // ended". Re-validating with stale data causes false rejections.
 
+        if isFinal {
+            // If session confirmed user was speaking during this utterance,
+            // accept unconditionally. The streaming phase already did all the
+            // signal validation with fresh data.
+            if engine.sessionIsUserSpeaking {
+                return true
+            }
+            // Fallback: no session latch but tokens look user-like
+            // (very short utterance where latch didn't fire)
+            let n = Float(tokens.count)
+            let gazeMean = tokens.reduce(Float(0)) { $0 + $1.gazeOnScreen } / n
+            let corr = engine.lipAudioCorrelator.correlation
+            if corr >= 0.20 && gazeMean >= 0.30 {
+                return true
+            }
+            return false
+        }
+
+        // --- Streaming path (unchanged) ---
         let n = Float(tokens.count)
 
         let jawMean = tokens.reduce(Float(0)) { $0 + $1.jawDelta } / n
@@ -803,11 +841,6 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         let jawVariance = tokens.reduce(Float(0)) { $0 + ($1.jawDelta - jawMean) * ($1.jawDelta - jawMean) } / n
         let jawStd = sqrtf(jawVariance)
 
-        // === v6 Corr-Enhanced Classifier ===
-        // Autoresearch finding: corr is the strongest signal for distinguishing
-        // user speech from ambient. yaw_reject=0.35 + corr_accept=0.20 gives
-        // Precision=100% on test data.
-
         // Hard reject: turned away
         if yawMean > 0.35 { return false }
 
@@ -816,26 +849,6 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
         // Hard reject: negative correlation (someone else is speaking)
         if corr < -0.20 { return false }
-
-        // For final (LLM trigger): accept if session confirmed user speaking
-        // (corr latched during the utterance) OR if instantaneous corr is still
-        // positive. The old check required corr >= 0.20 at isFinal time, but
-        // by then the user has stopped speaking and corr has decayed.
-        if isFinal {
-            // Path A: session latch — user was confirmed speaking during this
-            // utterance via lip-audio correlation. Trust it.
-            if engine.sessionIsUserSpeaking && gazeMean >= 0.20 {
-                if jawStd > 0.15 { return false }
-                return true
-            }
-            // Path B: instantaneous corr still positive (short utterance where
-            // isFinal arrives before corr decays)
-            if corr >= 0.20 && gazeMean >= 0.30 {
-                if jawStd > 0.15 { return false }
-                return true
-            }
-            return false
-        }
 
         // For streaming (called when per-token returns all false but we still
         // want sentence-level fallback): more lenient
