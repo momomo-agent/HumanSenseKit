@@ -405,9 +405,14 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
                     // Two-layer classification (v10d) for streaming.
                     let classifiedTokens = self.classifyTokens(self.currentTokens, isFinal: false)
-                    let hasUserTokens = classifiedTokens.contains(true)
+                    let userTokenCount = classifiedTokens.filter { $0 }.count
+                    let hasUserTokens = userTokenCount > 0
+                    // Require at least 30% of tokens to be user-classified
+                    // to prevent single-frame flukes from latching the whole sentence.
+                    let userRatio = self.currentTokens.isEmpty ? Float(0) : Float(userTokenCount) / Float(self.currentTokens.count)
+                    let hasSubstantialUserTokens = userRatio >= 0.30 || userTokenCount >= 3
 
-                    if hasUserTokens {
+                    if hasSubstantialUserTokens {
                         self.streamingHadUserTokens = true
                         // Emit tokens with per-token classification
                         let classified = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
@@ -420,7 +425,7 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     // If no user tokens, don't emit streaming tokens (silence)
 
                     // Pause detection: only reset timer if sentence has user tokens.
-                    if hasUserTokens && self.pauseCommitThreshold > 0 {
+                    if hasSubstantialUserTokens && self.pauseCommitThreshold > 0 {
                         let accumulatedAttributed = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
                             let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
                             return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
