@@ -55,6 +55,8 @@ public class STTManager: NSObject, ObservableObject {
     /// Called with raw audio samples (16kHz mono Float32) from the mic tap.
     /// Use this to feed GazeSpeakerEngine.processAudioBuffer() for diarization.
     public var onAudioSamples: ((_ samples: [Float]) -> Void)?
+    /// Raw audio buffer callback (no resampling). Called on every buffer from mic.
+    public var onRawAudioBuffer: ((_ buffer: AVAudioPCMBuffer) -> Void)?
 
     /// Lazy-init resampler to convert mic buffers to 16kHz mono for speaker embedding.
     /// Accessed from audio tap thread (nonisolated).
@@ -258,6 +260,12 @@ public class STTManager: NSObject, ObservableObject {
             speech.appendBuffer(buffer)
             Task { @MainActor in
                 audioDetection?.processBuffer(buffer)
+            }
+            // Raw buffer callback (for Scribe audio capture)
+            if let onRaw = self?.onRawAudioBuffer {
+                Task { @MainActor in
+                    onRaw(buffer)
+                }
             }
             // Forward raw samples for speaker diarization (resampled to 16kHz mono Float32)
             if let onSamples = self?.onAudioSamples {
