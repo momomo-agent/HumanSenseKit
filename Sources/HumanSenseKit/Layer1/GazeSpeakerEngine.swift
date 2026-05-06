@@ -783,12 +783,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     /// Performance: Precision=100% Recall=100% F1=1.000 FPR=0.0%
     /// (vs v2: Precision=14% Recall=50% F1=0.222 FPR=25.5%)
     private func classifyConversationScene(_ tokens: [TokenSegment], isFinal: Bool) -> Bool {
-        // Session gate for FINAL only: require sessionIsUserSpeaking before
-        // triggering LLM. Streaming tokens are shown more permissively so
-        // the user gets immediate visual feedback while session bootstraps.
-        if isFinal && !engine.sessionIsUserSpeaking {
-            return false
-        }
+        // Session gate removed (4.28.0): corr + gaze + yaw gates below are
+        // sufficient. The old session gate caused isFinal to be rejected
+        // even when streaming had already accepted the same tokens, killing
+        // the pause timer and leaving STT text stuck on screen forever.
 
         let n = Float(tokens.count)
 
