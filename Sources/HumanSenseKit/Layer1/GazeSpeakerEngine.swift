@@ -928,26 +928,20 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
     }
 
     /// Per-token classification for conversation scene streaming.
-    /// Accept when session latch is active AND basic gaze/yaw checks pass.
-    /// The session latch itself already validated lip-audio correlation,
-    /// so we don't need a high corr threshold per-token.
+    /// Lenient: show STT text whenever user is roughly facing the device.
+    /// The heavy lifting (should we trigger LLM?) is done at isFinal time.
+    /// Streaming is just visual feedback — false positives are harmless
+    /// (text appears briefly then disappears if isFinal rejects).
     private func classifyTokenForStreaming(_ token: TokenSegment) -> Bool {
-        // Must have session latch
-        if !engine.sessionIsUserSpeaking { return false }
-
-        // Hard reject: head turned away (> 0.40 rad)
-        if abs(token.headYaw) > 0.40 { return false }
+        // Hard reject: head turned far away (> 0.50 rad)
+        if abs(token.headYaw) > 0.50 { return false }
 
         // Hard reject: clearly not looking at screen
-        if token.gazeOnScreen < 0.15 { return false }
+        if token.gazeOnScreen < 0.10 { return false }
 
-        // Hard reject: strong negative correlation (someone else speaking)
-        let corr = engine.lipAudioCorrelator.correlation
-        if corr < -0.10 { return false }
-
-        // Session latch is active + basic checks pass = accept
-        // The latch already confirmed lip-audio correlation during this
-        // utterance. No need for per-token corr >= 0.55 which was too strict.
+        // Accept: user is roughly facing the device and STT detected speech.
+        // Session latch / corr checks are too unreliable for streaming
+        // (correlator has timing issues, latch can be stale from forceEndSession).
         return true
     }
 
