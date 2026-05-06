@@ -942,12 +942,21 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
         // Must have voice activity
         guard engine.audioManager.audioState.isSpeaking else { return false }
 
-        // Key discriminator: jaw must be actively moving.
-        // When someone else speaks, user's jaw stays relatively still.
-        // jawDelta is the per-token jaw movement magnitude.
-        if token.jawDelta < 0.08 { return false }
+        // Primary discriminator: lip-audio correlation.
+        // When correlator is working (audioStd > 0), it's the strongest signal
+        // to distinguish "I'm speaking" from "someone else is speaking".
+        let corr = engine.lipAudioCorrelator.correlation
+        if corr >= 0.25 {
+            // Correlator confirms user is speaking — trust it
+            return true
+        }
 
-        return true
+        // Fallback: jaw movement magnitude.
+        // Threshold 0.25 filters out micro-movements (listening reactions)
+        // while passing real speech (typical 0.30-0.50).
+        if token.jawDelta >= 0.25 { return true }
+
+        return false
     }
 
     // MARK: - Confidence Score

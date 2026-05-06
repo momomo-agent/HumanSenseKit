@@ -98,6 +98,12 @@ public class LipAudioCorrelator {
         let audioRMS: Float
     }
 
+    /// Track last audio value to detect real updates
+    private var lastAudioRMS: Float = 0
+    /// Accumulate lip deviation between audio updates
+    private var pendingLipDeviations: [Float] = []
+    private var pendingLipTimestamp: TimeInterval = 0
+
     private struct Envelope {
         let timestamp: TimeInterval
         let lipStd: Float
@@ -106,10 +112,10 @@ public class LipAudioCorrelator {
 
     // MARK: - Configuration
 
-    private let windowDuration: TimeInterval = 1.5
+        private let windowDuration: TimeInterval = 1.5
     private let correlationThreshold: Float = 0.3  // Pearson correlation threshold
-    private let minSamples = 30  // ~500ms at 60fps
-    private let subWindowSize = 10  // ~167ms rolling std window
+    private let minSamples = 8   // ~800ms at ~10Hz audio update rate
+    private let subWindowSize = 4  // ~400ms rolling std window at ~10Hz
     // Thresholds for "active" in rolling std
     private let lipStdThreshold: Float = 0.02  // lip std above this = mouth is moving
     private let audioStdThreshold: Float = 0.001  // audio std above this = sound present
@@ -221,7 +227,21 @@ public class LipAudioCorrelator {
 
         let lipDeviation = max(0, activity - lipBaseline)
 
-        samples.append(Sample(timestamp: timestamp, lipDeviation: lipDeviation, audioRMS: audioRMS))
+        // Only record a sample when audio actually updates (new RMS value).
+        // Audio buffers arrive at ~10Hz while ARKit runs at 60fps.
+        // Recording every frame causes 6 identical audioRMS values in a row,
+        // making rolling audioStd ≈ 0 and breaking correlation.
+        let audioChanged = abs(audioRMS - lastAudioRMS) > 1e-6
+        pendingLipDeviations.append(lipDeviation)
+        pendingLipTimestamp = timestamp
+
+        if audioChanged {
+            // Use mean lip deviation since last audio update
+            let meanLip = pendingLipDeviations.reduce(0, +) / Float(pendingLipDeviations.count)
+            samples.append(Sample(timestamp: timestamp, lipDeviation: meanLip, audioRMS: audioRMS))
+            lastAudioRMS = audioRMS
+            pendingLipDeviations.removeAll(keepingCapacity: true)
+        }
 
         // Trim old samples
         let cutoff = timestamp - windowDuration
