@@ -5,7 +5,7 @@ import ARKit
 public enum HeadOrientation {
     case forward, left, right
 
-    public static let threshold: Float = 0.3  // ~17 degrees
+    public static let threshold: Float = 0.2  // ~17 degrees
 
     public init(yaw: Float) {
         if yaw > Self.threshold { self = .left }
