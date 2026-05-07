@@ -318,7 +318,7 @@ public class HumanStateEngine {
             // "user speaking" from "someone else speaking". Needs ~500ms
             // warmup; STT arriving at ~400ms may read false, but sentence
             // can upgrade later via wasCorrelated lookback.
-            if isCorrNow {
+            if isCorrNow && lookAt {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true  // latch once true
             }
