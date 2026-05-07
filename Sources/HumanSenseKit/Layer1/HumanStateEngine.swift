@@ -405,7 +405,9 @@ public class HumanStateEngine {
 
             // Latch on correlation — the primary signal that can tell
             // "user speaking" from "someone else speaking".
-            if !inCooldown && isCorrNow {
+            // Also require lookAt: correlation alone can't distinguish
+            // "speaking to device" from "speaking to someone else".
+            if !inCooldown && isCorrNow && lookAt {
                 sessionCorrCount += 1
                 sessionIsUserSpeaking = true
                 sessionUncorrFrames = 0  // reset uncorr counter on any corr frame
