@@ -343,16 +343,16 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                     self.buildFinalSegments(newTokens)
                     self.currentTokens = []
 
-                    // If streaming already classified user tokens, trust that
-                    // verdict. isFinal tokens have stale gaze/corr data (user
-                    // stopped speaking, looked away). Re-classifying with stale
-                    // data causes false rejections.
+                    // Use UserSentenceReconstructor's verdict — same logic as
+                    // HumanSenseDemo's 4th tab. The reconstructor was already
+                    // fed this batch (STTManager feeds it before calling us).
+                    let reconstructorSaysUser = !self.engine.sttManager.userSentenceReconstructor.userSentence
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     let classifiedTokens: [Bool]
-                    if self.streamingHadUserTokens {
-                        // All tokens are user — streaming already validated
+                    if reconstructorSaysUser {
                         classifiedTokens = Array(repeating: true, count: newTokens.count)
                     } else {
-                        classifiedTokens = self.classifyTokens(newTokens, isFinal: true)
+                        classifiedTokens = Array(repeating: false, count: newTokens.count)
                     }
                     // Reset for next utterance
                     self.streamingHadUserTokens = false
@@ -403,22 +403,18 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
                 } else {
                     self.buildStreamingTokens(newTokens)
 
-                    // Two-layer classification (v10d) for streaming.
-                    let classifiedTokens = self.classifyTokens(self.currentTokens, isFinal: false)
-                    let userTokenCount = classifiedTokens.filter { $0 }.count
-                    let hasUserTokens = userTokenCount > 0
-                    // Require at least 30% of tokens to be user-classified
-                    // to prevent single-frame flukes from latching the whole sentence.
-                    let userRatio = self.currentTokens.isEmpty ? Float(0) : Float(userTokenCount) / Float(self.currentTokens.count)
-                    let hasSubstantialUserTokens = userRatio >= 0.30 || userTokenCount >= 3
-
+                    // Use reconstructor's userSentence to decide if user is speaking.
+                    // This aligns with HumanSenseDemo's 4th tab verdict.
+                    let reconstructorText = self.engine.sttManager.userSentenceReconstructor.userSentence
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let hasSubstantialUserTokens = !reconstructorText.isEmpty
                     if hasSubstantialUserTokens {
                         self.streamingHadUserTokens = true
-                        // Emit tokens with per-token classification
-                        let classified = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
-                            let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
+                        // Emit all tokens as .user (reconstructor confirmed user speech)
+                        let classified = self.currentTokens.map { legacy in
+                            let attr = Self.toAttributedToken(legacy, source: .user)
                             return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
-                                                          source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
+                                                          source: .user, score: attr.score, metadata: attr.metadata)
                         }
                         self._eventSubject.send(.streamingTokens(classified))
                     }
@@ -426,10 +422,10 @@ public class GazeSpeakerEngine: SpeakerAttributionBackend {
 
                     // Pause detection: only reset timer if sentence has user tokens.
                     if hasSubstantialUserTokens && self.pauseCommitThreshold > 0 {
-                        let accumulatedAttributed = zip(self.currentTokens, classifiedTokens).map { (legacy, isUser) in
-                            let attr = Self.toAttributedToken(legacy, source: isUser ? .user : .ambient)
+                        let accumulatedAttributed = self.currentTokens.map { legacy in
+                            let attr = Self.toAttributedToken(legacy, source: .user)
                             return SpeakerAttributedToken(text: attr.text, audioTime: attr.audioTime, endTime: attr.endTime,
-                                                          source: isUser ? .user : .ambient, score: attr.score, metadata: attr.metadata)
+                                                          source: .user, score: attr.score, metadata: attr.metadata)
                         }
                         self.lastStreamingAttributedTokens = accumulatedAttributed
                         self.pauseTimer?.invalidate()

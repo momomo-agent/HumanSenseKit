@@ -331,14 +331,15 @@ public class STTManager: NSObject, ObservableObject {
         }
 
         speech.onTokens = { [weak self] tokens, isFinal in
-            self?.onTokens?(tokens, isFinal)
-            // Feed token attributor (legacy)
+            // Feed reconstructor FIRST so GazeSpeakerEngine can read
+            // userSentence in its isFinal handler.
             self?.tokenAttributor.process(tokens: tokens, isFinal: isFinal)
-            // Feed new reconstructor
             self?.userSentenceReconstructor.recordTokens(
                 tokens, isFinal: isFinal,
                 audioStreamStart: self?.audioStreamStartTime
             )
+            // GazeSpeakerEngine callback — reconstructor is already updated.
+            self?.onTokens?(tokens, isFinal)
         }
 
         speech.onFirstBuffer = { [weak self] date in

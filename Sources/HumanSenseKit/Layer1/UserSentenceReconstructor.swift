@@ -803,9 +803,11 @@ public final class UserSentenceReconstructor: ObservableObject {
     /// existing ratio thresholds and take the product of gaze and head
     /// factors (both must be reasonably present for the gate to open).
     private func computeGateScore(gazeRatio: Float, headFwdRatio: Float) -> Float {
-        let gaze = smoothstep(edge0: 0.05, edge1: gazeRatioThreshold + 0.2, x: gazeRatio)
-        let head = smoothstep(edge0: 0.05, edge1: headFwdRatioThreshold + 0.2, x: headFwdRatio)
-        return gaze * head
+        // Hard gate: gaze must be >80% on screen AND head facing forward (headFwdRatio >80%).
+        // headFwdRatio is computed from abs(headYaw) < threshold in the token builder,
+        // so requiring >0.80 means abs(headYaw) < ~0.3 for >80% of the window.
+        guard gazeRatio >= 0.80 && headFwdRatio >= 0.80 else { return 0 }
+        return 1.0
     }
 
     /// L2 mouth motion. High when the mouth is doing something speech-like.
